@@ -940,7 +940,7 @@ internal static class SelfTests
         SlppConfig.Actions = SlppConfig.QuickRestart = true;
         SlppConfig.Scale = 100;
         for (int i = 0; i < 5; i++) await GameBridge.Frame();
-        foreach (string name in new[] { "SlppToolbarRestartSeed", "SlppToolbarRandomSeed", "SlppRestartSeed", "SlppRandomSeed" })
+        foreach (string name in new[] { "SlppToolbarRestartRoom", "SlppToolbarRestartSeed", "SlppToolbarRandomSeed", "SlppRestartRoom", "SlppRestartSeed", "SlppRandomSeed" })
         {
             var button = Widget<Button>(name);
             var point = button.GetGlobalRect().GetCenter();

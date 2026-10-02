@@ -181,13 +181,15 @@ internal static class Hud
 
     private static void BindAction(Button button, Shortcut shortcut)
     {
-        if (shortcut is Shortcut.RestartSeed or Shortcut.RandomSeed)
+        if (RequiresHold(shortcut))
         {
             button.TooltipText = SlppConfig.Name(shortcut) + "\nHold for 1 second";
             HoldButtons.Add(new HoldButton(button, () => Run(() => Execute(shortcut))));
         }
         else button.Pressed += () => Run(() => Execute(shortcut));
     }
+
+    private static bool RequiresHold(Shortcut shortcut) => shortcut is Shortcut.RestartRoom or Shortcut.RestartSeed or Shortcut.RandomSeed;
 
     private static PanelContainer Sheet(string name, int width, out VBoxContainer content)
     {
@@ -596,6 +598,6 @@ internal static class Hud
     private static string Tip(Shortcut shortcut)
     {
         string? key = SlppConfig.Binding(shortcut)?.ToString();
-        return SlppConfig.Name(shortcut) + (shortcut is Shortcut.RestartSeed or Shortcut.RandomSeed ? "\nHold for 1 second" : "") + (key != null && SlppConfig.Hotkeys ? "\n" + key : "");
+        return SlppConfig.Name(shortcut) + (RequiresHold(shortcut) ? "\nHold for 1 second" : "") + (key != null && SlppConfig.Hotkeys ? "\n" + key : "");
     }
 }
