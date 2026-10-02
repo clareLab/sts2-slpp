@@ -155,7 +155,7 @@ internal static class Ui
         return button;
     }
 
-    internal static (Button Button, Label Key) MenuRow(string text, string path, Action action, string name)
+    internal static (Button Button, Label Key) MenuRow(string text, string path, Action? action, string name)
     {
         var button = new Button { Name = name, Theme = Theme, ThemeTypeVariation = "SlppMenuRow", CustomMinimumSize = new Vector2(0, 36), MouseDefaultCursorShape = Control.CursorShape.PointingHand };
         var content = new MarginContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
@@ -186,17 +186,20 @@ internal static class Ui
             icon.AddChild(letter);
             letter.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
         }
-        var label = Text(text);
+        var label = WrappedText(text, 20, 1);
         label.VerticalAlignment = VerticalAlignment.Center;
         label.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         row.AddChild(label);
-        var key = Text("", 16);
+        var key = WrappedText("", 16, 102);
+        key.ClipText = true;
         key.CustomMinimumSize = new Vector2(102, 0);
         key.VerticalAlignment = VerticalAlignment.Center;
         key.HorizontalAlignment = HorizontalAlignment.Right;
         key.AddThemeColorOverride("font_color", new Color("b3c0c2"));
         row.AddChild(key);
-        button.Pressed += action;
+        row.Resized += () => { key.Visible = row.Size.X >= 240; icon.Visible = row.Size.X >= 140; };
+        row.MinimumSizeChanged += () => button.CustomMinimumSize = new Vector2(0, Math.Max(36, row.GetCombinedMinimumSize().Y + 8));
+        if (action != null) button.Pressed += action;
         return (button, key);
     }
 
@@ -240,6 +243,7 @@ internal static class Ui
             theme.SetStylebox("disabled", type, Surface("23323a", "3c4c53", 6));
         }
         theme.SetTypeVariation("SlppMenuRow", "Button");
+        theme.SetStylebox("focus", "Button", Surface("00000000", "f2d68d", 6));
         theme.SetStylebox("normal", "SlppMenuRow", new StyleBoxEmpty());
         theme.SetStylebox("disabled", "SlppMenuRow", new StyleBoxEmpty());
         foreach (string type in new[] { "Label", "Button", "Tree", "TooltipLabel" })

@@ -33,6 +33,7 @@ internal static class Hud
     private static PanelContainer? _flyout;
     private static readonly Dictionary<Shortcut, (Button Button, Label Key)> MenuItems = [];
     private static readonly Dictionary<Shortcut, Button> RestartButtons = [];
+    private static readonly List<HoldButton> HoldButtons = [];
     private static readonly Dictionary<Shortcut, Label> Bindings = [];
     private static readonly HashSet<Key> Held = [];
     private static string _listVersion = "";
@@ -79,7 +80,7 @@ internal static class Hud
         {
             var button = new Button { Name = "SlppToolbar" + shortcut };
             Ui.Icon(button, Ui.ShortcutIcon(shortcut), SlppConfig.Name(shortcut));
-            button.Pressed += () => Run(() => Execute(shortcut));
+            BindAction(button, shortcut);
             row.AddChild(button);
             RestartButtons.Add(shortcut, button);
         }
@@ -107,12 +108,13 @@ internal static class Hud
         _progress.AddThemeStyleboxOverride("background", new StyleBoxFlat { BgColor = new Color("23323a") });
         _progress.AddThemeStyleboxOverride("fill", new StyleBoxFlat { BgColor = new Color("d1ac60") });
         box.AddChild(_progress);
-        _menu = Sheet("SlppMenu", 344, out var menu);
+        _menu = Sheet("SlppMenu", 0, out var menu);
         menu.AddThemeConstantOverride("separation", 2);
         foreach (var shortcut in new[] { Shortcut.PreviousTurn, Shortcut.NextTurn, Shortcut.RestartRoom, Shortcut.RestartSeed, Shortcut.RandomSeed })
         {
             if (shortcut == Shortcut.RestartRoom) menu.AddChild(new HSeparator());
-            var item = Ui.MenuRow(SlppConfig.Name(shortcut), Ui.ShortcutIcon(shortcut), () => Run(() => Execute(shortcut)), "Slpp" + shortcut);
+            var item = Ui.MenuRow(SlppConfig.Name(shortcut), Ui.ShortcutIcon(shortcut), null, "Slpp" + shortcut);
+            BindAction(item.Button, shortcut);
             menu.AddChild(item.Button);
             MenuItems.Add(shortcut, item);
         }
@@ -175,6 +177,16 @@ internal static class Hud
         _messages = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
         _messages.AddThemeConstantOverride("separation", 10);
         scroll.AddChild(_messages);
+    }
+
+    private static void BindAction(Button button, Shortcut shortcut)
+    {
+        if (shortcut is Shortcut.RestartSeed or Shortcut.RandomSeed)
+        {
+            button.TooltipText = SlppConfig.Name(shortcut) + "\nHold for 1 second";
+            HoldButtons.Add(new HoldButton(button, () => Run(() => Execute(shortcut))));
+        }
+        else button.Pressed += () => Run(() => Execute(shortcut));
     }
 
     private static PanelContainer Sheet(string name, int width, out VBoxContainer content)
@@ -264,7 +276,8 @@ internal static class Hud
     {
         if (!FlyoutOpen) return;
         Vector2 viewport = _panel.GetViewportRect().Size;
-        _flyout!.Size = _flyout.GetCombinedMinimumSize();
+        var minimum = _flyout!.GetCombinedMinimumSize();
+        _flyout.Size = new Vector2(_flyout == _menu ? _panel.Size.X : minimum.X, minimum.Y);
         if (_flyout == _history)
         {
             float requested = float.IsFinite(SlppConfig.HistoryHeight) ? SlppConfig.HistoryHeight : 420;
@@ -459,7 +472,8 @@ internal static class Hud
         foreach (var pair in MenuItems)
         {
             pair.Value.Button.Disabled = Recorder.Busy || !SlppConfig.Enabled(pair.Key);
-            pair.Value.Key.Text = SlppConfig.Hotkeys ? SlppConfig.Binding(pair.Key)?.ToString() ?? "" : "";
+            string binding = SlppConfig.Hotkeys ? SlppConfig.Binding(pair.Key)?.ToString() ?? "" : "";
+            if (pair.Value.Key.Text != binding) { pair.Value.Key.Text = binding; Ui.FitLabel(pair.Value.Key, 16); }
             pair.Value.Button.GetChild<Control>(0).Modulate = pair.Value.Button.Disabled ? new Color("83918d") : Colors.White;
         }
         foreach (var pair in Bindings)
@@ -469,6 +483,7 @@ internal static class Hud
             pair.Value.Text = binding;
             Ui.FitLabel(pair.Value, 18);
         }
+        foreach (var hold in HoldButtons) hold.Tick(!Recorder.Busy && _layer.Visible && NGame.IsGameFocusedWindow());
         Vector2 viewport = ((SceneTree)Engine.GetMainLoop()).Root.GetVisibleRect().Size;
         _shield.Size = viewport;
         _panel.Size = _panel.GetCombinedMinimumSize();
@@ -568,6 +583,7 @@ internal static class Hud
         _disabled = true;
         _dragging = false;
         Held.Clear();
+        foreach (var hold in HoldButtons) hold.Cancel();
         if (_layer != null) _layer.Visible = false;
         if (GodotObject.IsInstanceValid(_shield)) _shield.Visible = false;
         if (GodotObject.IsInstanceValid(_history)) _history.Hide();
@@ -580,6 +596,6 @@ internal static class Hud
     private static string Tip(Shortcut shortcut)
     {
         string? key = SlppConfig.Binding(shortcut)?.ToString();
-        return SlppConfig.Name(shortcut) + (key != null && SlppConfig.Hotkeys ? "\n" + key : "");
+        return SlppConfig.Name(shortcut) + (shortcut is Shortcut.RestartSeed or Shortcut.RandomSeed ? "\nHold for 1 second" : "") + (key != null && SlppConfig.Hotkeys ? "\n" + key : "");
     }
 }

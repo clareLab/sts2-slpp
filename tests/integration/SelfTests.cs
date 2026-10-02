@@ -34,7 +34,7 @@ internal static class SelfTests
         {
             if (!File.Exists(ProjectSettings.GlobalizePath("user://.slpp-test-sandbox")))
                 throw new InvalidOperationException("Self tests require an isolated user-data directory with .slpp-test-sandbox marker");
-            if (OS.GetCmdlineArgs().Contains("--slpp-suite=typesetting")) { await TestTypesetting(); return; }
+            if (OS.GetCmdlineArgs().Contains("--slpp-suite=typesetting")) { await TestTypesetting(); await TestHoldButton(); return; }
             for (int i = 0; i < 180; i++) await GameBridge.Frame();
             SaveManager.Instance.SetFtuesEnabled(false);
             SaveManager.Instance.PrefsSave.FastMode = FastModeType.Instant;
@@ -695,6 +695,68 @@ internal static class SelfTests
         tree.QueueFree();
     }
 
+    private static async Task TestHoldButton(bool screenshot = false)
+    {
+        var root = ((SceneTree)Engine.GetMainLoop()).Root;
+        var button = new Button { Position = new Vector2(600, 100), Size = new Vector2(40, 40), FocusMode = Control.FocusModeEnum.None };
+        Ui.Icon(button, Ui.ShortcutIcon(Shortcut.RestartSeed), "Same seed");
+        var layer = new CanvasLayer { Layer = 200 };
+        root.AddChild(layer);
+        layer.AddChild(button);
+        if (screenshot) button.Position = Widget<Button>("SlppToolbarRestartSeed").GlobalPosition;
+        ulong now = 0;
+        int activations = 0;
+        var hold = new HoldButton(button, () => activations++, () => now);
+        await GameBridge.Frame();
+        void Pointer(bool pressed)
+        {
+            var point = button.GetGlobalRect().GetCenter();
+            root.PushInput(new InputEventMouseButton { Position = point, GlobalPosition = point, ButtonIndex = MouseButton.Left, Pressed = pressed, ButtonMask = pressed ? MouseButtonMask.Left : 0 }, true);
+        }
+        Pointer(true);
+        now = 500;
+        hold.Tick(true);
+        Check(activations == 0 && Math.Abs(hold.Progress - .5f) < .001f && button.GetNode<Control>("HoldBorder").Visible,
+            "holding a restart button advances its border without activating early");
+        if (screenshot)
+        {
+            await root.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+            root.GetTexture().GetImage().SavePng(ProjectSettings.GlobalizePath("user://slpp-hold.png"));
+        }
+        Pointer(false);
+        now = 1500;
+        hold.Tick(true);
+        Check(activations == 0 && hold.Progress == 0, "a short click cancels the hold and never restarts on release");
+        Pointer(true);
+        now += 999;
+        hold.Tick(true);
+        Check(activations == 0, "restart still waits at 999 milliseconds");
+        now++;
+        hold.Tick(true);
+        now += 2000;
+        hold.Tick(true);
+        Pointer(false);
+        Check(activations == 1, "one full second triggers exactly once even when held longer or released afterward");
+        foreach (string reason in new[] { "pointer exit", "hidden", "disabled", "blocked" })
+        {
+            Pointer(true);
+            now += 400;
+            hold.Tick(true);
+            if (reason == "pointer exit") button.EmitSignal(Control.SignalName.MouseExited);
+            if (reason == "hidden") button.Hide();
+            if (reason == "disabled") button.Disabled = true;
+            hold.Tick(reason != "blocked");
+            now += 2000;
+            hold.Tick(reason != "blocked");
+            Check(activations == 1 && hold.Progress == 0, reason + " cancels a pending restart");
+            Pointer(false);
+            button.Show();
+            button.Disabled = false;
+        }
+        root.RemoveChild(layer);
+        layer.QueueFree();
+    }
+
     private static async Task TestLayout(bool previewOnly = false)
     {
         ResetSettings();
@@ -849,6 +911,7 @@ internal static class SelfTests
         Check(toolbar.Position.DistanceTo(origin) < 3 && SlppConfig.ToolbarX == -1, "reset returns toolbar to its default position");
         await root.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
         Check(root.GetTexture().GetImage().SavePng(ProjectSettings.GlobalizePath("user://slpp-toolbar.png")) == Error.Ok, "compact toolbar screenshot");
+        await TestHoldButton(true);
         root.WarpMouse(Widget<Button>("SlppUndo").GetGlobalRect().GetCenter());
         for (int i = 0; i < 3; i++) await GameBridge.Frame();
         await root.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
@@ -863,6 +926,29 @@ internal static class SelfTests
         root.PushInput(new InputEventMouseButton { Position = menuPosition, GlobalPosition = menuPosition, ButtonIndex = MouseButton.Left, Pressed = false }, true);
         for (int i = 0; i < 3; i++) await GameBridge.Frame();
         Check(Widget<PanelContainer>("SlppMenu").Visible, "menu icon opens with a mouse click");
+        Check(Math.Abs(Widget<PanelContainer>("SlppMenu").GetGlobalRect().Size.X - toolbar.GetGlobalRect().Size.X) < 1,
+            "the menu matches the toolbar width");
+        foreach (int scale in new[] { 80, 140 })
+        {
+            SlppConfig.Scale = scale;
+            SlppConfig.Actions = SlppConfig.QuickRestart = false;
+            for (int i = 0; i < 5; i++) await GameBridge.Frame();
+            var menuRect = Widget<PanelContainer>("SlppMenu").GetGlobalRect();
+            Check(Math.Abs(menuRect.Size.X - toolbar.GetGlobalRect().Size.X) < 1 && menuRect.Position.X == toolbar.Position.X,
+                $"the menu stays aligned with a reduced toolbar at {scale}% scale");
+        }
+        SlppConfig.Actions = SlppConfig.QuickRestart = true;
+        SlppConfig.Scale = 100;
+        for (int i = 0; i < 5; i++) await GameBridge.Frame();
+        foreach (string name in new[] { "SlppToolbarRestartSeed", "SlppToolbarRandomSeed", "SlppRestartSeed", "SlppRandomSeed" })
+        {
+            var button = Widget<Button>(name);
+            var point = button.GetGlobalRect().GetCenter();
+            root.PushInput(new InputEventMouseButton { Position = point, GlobalPosition = point, ButtonIndex = MouseButton.Left, Pressed = true, ButtonMask = MouseButtonMask.Left }, true);
+            root.PushInput(new InputEventMouseButton { Position = point, GlobalPosition = point, ButtonIndex = MouseButton.Left, Pressed = false }, true);
+            Check(!Recorder.Busy && GameBridge.Fingerprint() == hash && !button.GetNode<Control>("HoldBorder").Visible,
+                name + " ignores a short mouse click");
+        }
         var menuItem = Widget<Button>("SlppRestartRoom");
         var hover = menuItem.GetGlobalRect().GetCenter();
         root.WarpMouse(hover);
