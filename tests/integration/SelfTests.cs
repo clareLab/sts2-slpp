@@ -395,8 +395,8 @@ internal static class SelfTests
         Check(Widget<PanelContainer>("SlppToolbar").IsVisibleInTree(), "toolbar appears after Continue finishes initializing");
         Press("SlppShortcuts");
         await GameBridge.Frame();
-        Check(Widget<AcceptDialog>("SlppShortcutList").Visible, "toolbar menu works after Continue");
-        Widget<AcceptDialog>("SlppShortcutList").Hide();
+        Check(Widget<PanelContainer>("SlppShortcutList").Visible, "toolbar menu works after Continue");
+        Press("SlppShortcutsClose");
         GD.Print("[slpp] SELFTEST_RESUME_OK");
     }
 
@@ -428,13 +428,7 @@ internal static class SelfTests
     }
 
     private static T Widget<T>(string name) where T : Node => GameBridge.Descendants(((SceneTree)Engine.GetMainLoop()).Root).OfType<T>().Single(n => n.Name == name);
-    private static void Press(string name)
-    {
-        if (name == "SlppShortcuts") Widget<MenuButton>("SlppMenuButton").GetPopup().EmitSignal(PopupMenu.SignalName.IdPressed, 100);
-        else if (name == "SlppResetPosition") Widget<MenuButton>("SlppMenuButton").GetPopup().EmitSignal(PopupMenu.SignalName.IdPressed, 101);
-        else if (name == "SlppTimeline") Widget<MenuButton>("SlppMenuButton").GetPopup().EmitSignal(PopupMenu.SignalName.IdPressed, (int)Shortcut.Timeline);
-        else Widget<Button>(name).EmitSignal(Button.SignalName.Pressed);
-    }
+    private static void Press(string name) => Widget<Button>(name).EmitSignal(Button.SignalName.Pressed);
     private static InputEventKey KeyEvent(Key key, bool ctrl = false, bool shift = false, bool pressed = true) =>
         new() { Keycode = key, PhysicalKeycode = key, CtrlPressed = ctrl, ShiftPressed = shift, Pressed = pressed };
     private static void ResetSettings() => AccessTools.Method(typeof(ModConfig), "RestoreDefaultsNoConfirm").Invoke(SlppConfig.Instance, null);
@@ -593,7 +587,7 @@ internal static class SelfTests
         Press("SlppShortcuts");
         for (int i = 0; i < 3; i++) await GameBridge.Frame();
         Hud.Tick();
-        var shortcuts = Widget<AcceptDialog>("SlppShortcutList");
+        var shortcuts = Widget<PanelContainer>("SlppShortcutList");
         Check(shortcuts.Visible && Widget<Label>("SlppBindingUndo").Text == "Ctrl+Z", "menu opens current shortcut list");
         SlppConfig.UndoKey = "Alt+U";
         Hud.Tick();
@@ -601,8 +595,8 @@ internal static class SelfTests
         SlppConfig.UndoKey = "Ctrl+Z";
         Hud.Tick();
         await root.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
-        Check(shortcuts.GetTexture().GetImage().SavePng(ProjectSettings.GlobalizePath("user://slpp-help.png")) == Error.Ok, "shortcut list screenshot");
-        shortcuts.GetOkButton().EmitSignal(Button.SignalName.Pressed);
+        Check(root.GetTexture().GetImage().SavePng(ProjectSettings.GlobalizePath("user://slpp-help.png")) == Error.Ok, "shortcut list screenshot");
+        Press("SlppShortcutsClose");
         DisplayServer.WindowMoveToForeground();
         for (int i = 0; i < 8; i++) await GameBridge.Frame();
         Check(!shortcuts.Visible && !Hud.ModalOpen, "shortcut dialog closes and releases input");
@@ -650,6 +644,7 @@ internal static class SelfTests
             Check(toolbar.Position.DistanceTo(before + new Vector2(70, 50)) < 1, $"release applies the final position at {scale}% scale");
         }
         SlppConfig.Scale = 100;
+        SlppConfig.Instance.Save();
         Hud.Tick();
         var savedPosition = toolbar.Position;
         SlppConfig.ToolbarX = SlppConfig.ToolbarY = -1;
@@ -668,19 +663,42 @@ internal static class SelfTests
         for (int i = 0; i < 3; i++) await GameBridge.Frame();
         await root.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
         root.GetTexture().GetImage().SavePng(ProjectSettings.GlobalizePath("user://slpp-hover.png"));
-        var menuButton = Widget<MenuButton>("SlppMenuButton");
+        var menuButton = Widget<Button>("SlppMenuButton");
         var menuPosition = menuButton.GetGlobalRect().GetCenter();
         root.PushInput(new InputEventMouseButton { Position = menuPosition, GlobalPosition = menuPosition, ButtonIndex = MouseButton.Left, Pressed = true, ButtonMask = MouseButtonMask.Left }, true);
         root.PushInput(new InputEventMouseButton { Position = menuPosition, GlobalPosition = menuPosition, ButtonIndex = MouseButton.Left, Pressed = false }, true);
         for (int i = 0; i < 3; i++) await GameBridge.Frame();
-        Check(menuButton.GetPopup().Visible, "menu icon opens with a mouse click");
+        Check(Widget<PanelContainer>("SlppMenu").Visible, "menu icon opens with a mouse click");
         await root.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
         root.GetTexture().GetImage().SavePng(ProjectSettings.GlobalizePath("user://slpp-menu.png"));
-        menuButton.GetPopup().Hide();
+        Press("SlppMenuButton");
+        Check(!Hud.ModalOpen, "menu icon toggles the panel closed");
         Press("SlppTimeline");
         for (int i = 0; i < 15; i++) await GameBridge.Frame();
         await root.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
-        Check(Widget<AcceptDialog>("SlppHistory").GetTexture().GetImage().SavePng(ProjectSettings.GlobalizePath("user://slpp-ui.png")) == Error.Ok, "aligned history dialog screenshot");
+        Check(root.GetTexture().GetImage().SavePng(ProjectSettings.GlobalizePath("user://slpp-ui.png")) == Error.Ok, "aligned history dialog screenshot");
+        var history = Widget<PanelContainer>("SlppHistory");
+        var toolbarRect = toolbar.GetGlobalRect();
+        Check(history.Visible && history.Position.X == toolbar.Position.X && history.Position.Y >= toolbarRect.End.Y && history.Position.Y - toolbarRect.End.Y <= 9, "history extends directly below the toolbar");
+        await SendKey(Key.F8);
+        Check(!Hud.ModalOpen && !history.Visible, "history hotkey collapses its open panel");
+        await SendKey(Key.F8);
+        Check(history.Visible, "history hotkey reopens its panel");
+        SlppConfig.ToolbarX = SlppConfig.ToolbarY = 1;
+        SlppConfig.Scale = 140;
+        Hud.Tick();
+        var viewport = root.GetVisibleRect();
+        var historyRect = history.GetGlobalRect();
+        Check(viewport.Encloses(historyRect) && historyRect.End.Y <= toolbar.Position.Y, "history opens upward and stays on screen near the lower right edge");
+        await SendKey(Key.Escape);
+        Check(!Hud.ModalOpen && !Widget<ColorRect>("SlppInputShield").Visible, "Escape collapses the panel and releases input");
+        Press("SlppMenuButton");
+        var outside = viewport.GetCenter();
+        root.PushInput(new InputEventMouseButton { Position = outside, GlobalPosition = outside, ButtonIndex = MouseButton.Left, Pressed = true, ButtonMask = MouseButtonMask.Left }, true);
+        root.PushInput(new InputEventMouseButton { Position = outside, GlobalPosition = outside, ButtonIndex = MouseButton.Left, Pressed = false }, true);
+        Check(!Hud.ModalOpen && GameBridge.Fingerprint() == hash, "outside click dismisses the menu without changing gameplay");
+        SlppConfig.Scale = 100;
+        Press("SlppResetPosition");
     }
 
     private static async Task TestPotions()

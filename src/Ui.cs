@@ -7,6 +7,9 @@ internal static class Ui
     private static Theme? _theme;
     internal static Theme Theme => _theme ??= CreateTheme();
     internal const string BackIcon = "res://images/atlases/compressed.sprites/back_button_arrow.tres";
+    internal const string CloseIcon = "res://images/atlases/compressed.sprites/back_button_x.tres";
+    internal const string KeysIcon = "res://images/ui/keyboard_icon_ninepatch.png";
+    internal const string PositionIcon = "res://images/atlases/ui_atlas.sprites/top_bar/top_bar_map.tres";
     internal const string MenuIcon = "res://images/atlases/ui_atlas.sprites/top_bar/top_bar_settings.tres";
 
     internal static Label Text(string text, int size = 20)
@@ -46,21 +49,83 @@ internal static class Ui
         icon.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect, margin: 6);
     }
 
+    internal static string ShortcutIcon(Shortcut shortcut) => shortcut switch
+    {
+        Shortcut.PreviousTurn => "res://images/atlases/ui_atlas.sprites/settings_tiny_left_arrow.tres",
+        Shortcut.NextTurn => "res://images/atlases/ui_atlas.sprites/settings_tiny_right_arrow.tres",
+        Shortcut.RestartSeed => "res://images/atlases/ui_atlas.sprites/top_bar/top_bar_floor.tres",
+        Shortcut.RandomSeed => "res://images/packed/statistics_screen/stats_questionmark.png",
+        Shortcut.Timeline => "res://images/packed/main_menu/submenu_history_icon.png",
+        _ => BackIcon
+    };
+
+    internal static Button TextButton(string text, Action action, string name)
+    {
+        var button = new Button { Text = text, Name = name, Theme = Theme, CustomMinimumSize = new Vector2(88, 36), MouseDefaultCursorShape = Control.CursorShape.PointingHand };
+        button.Pressed += action;
+        return button;
+    }
+
+    internal static (Button Button, Label Key) MenuRow(string text, string path, Action action, string name)
+    {
+        var button = new Button { Name = name, Theme = Theme, Flat = true, CustomMinimumSize = new Vector2(0, 36), MouseDefaultCursorShape = Control.CursorShape.PointingHand };
+        var content = new MarginContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        content.AddThemeConstantOverride("margin_left", 8);
+        content.AddThemeConstantOverride("margin_right", 8);
+        content.AddThemeConstantOverride("margin_top", 4);
+        content.AddThemeConstantOverride("margin_bottom", 4);
+        button.AddChild(content);
+        content.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+        var row = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        row.AddThemeConstantOverride("separation", 12);
+        content.AddChild(row);
+        var icon = new TextureRect
+        {
+            Texture = ResourceLoader.Exists(path) ? GD.Load<Texture2D>(path) : GD.Load<Texture2D>(MenuIcon),
+            CustomMinimumSize = new Vector2(24, 24),
+            SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+            ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+            StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+            MouseFilter = Control.MouseFilterEnum.Ignore
+        };
+        row.AddChild(icon);
+        if (path == KeysIcon)
+        {
+            var letter = Text("K", 14);
+            letter.HorizontalAlignment = HorizontalAlignment.Center;
+            letter.VerticalAlignment = VerticalAlignment.Center;
+            icon.AddChild(letter);
+            letter.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+        }
+        var label = Text(text);
+        label.VerticalAlignment = VerticalAlignment.Center;
+        label.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        row.AddChild(label);
+        var key = Text("", 16);
+        key.CustomMinimumSize = new Vector2(102, 0);
+        key.VerticalAlignment = VerticalAlignment.Center;
+        key.HorizontalAlignment = HorizontalAlignment.Right;
+        key.AddThemeColorOverride("font_color", new Color("b3c0c2"));
+        row.AddChild(key);
+        button.Pressed += action;
+        return (button, key);
+    }
+
     internal static PanelContainer Panel() => new() { Theme = Theme };
 
     private static StyleBoxFlat Surface(string background, string border, int padding = 2) => new()
     {
         BgColor = new Color(background),
         BorderColor = new Color(border),
-        BorderWidthBottom = 2,
-        BorderWidthTop = 2,
-        BorderWidthLeft = 2,
-        BorderWidthRight = 2,
-        CornerRadiusTopLeft = 5,
-        CornerRadiusTopRight = 5,
-        CornerRadiusBottomLeft = 5,
-        CornerRadiusBottomRight = 5,
-        CornerDetail = 1,
+        BorderWidthBottom = 1,
+        BorderWidthTop = 1,
+        BorderWidthLeft = 1,
+        BorderWidthRight = 1,
+        CornerRadiusTopLeft = 6,
+        CornerRadiusTopRight = 6,
+        CornerRadiusBottomLeft = 6,
+        CornerRadiusBottomRight = 6,
+        CornerDetail = 8,
         ContentMarginLeft = padding,
         ContentMarginRight = padding,
         ContentMarginTop = padding,
@@ -77,7 +142,7 @@ internal static class Ui
         panel.ShadowSize = 2;
         panel.ShadowOffset = new Vector2(0, 2);
         theme.SetStylebox("panel", "PanelContainer", panel);
-        foreach (string type in new[] { "Button", "MenuButton" })
+        foreach (string type in new[] { "Button" })
         {
             theme.SetStylebox("normal", type, Surface("2e4351", "526c75", 6));
             theme.SetStylebox("hover", type, Surface("526575", "f2d68d", 6));
@@ -85,28 +150,33 @@ internal static class Ui
             theme.SetStylebox("hover_pressed", type, Surface("203440", "f2d68d", 6));
             theme.SetStylebox("disabled", type, Surface("23323a", "3c4c53", 6));
         }
-        foreach (string type in new[] { "Label", "Button", "MenuButton", "PopupMenu", "Tree", "TooltipLabel" })
+        foreach (string type in new[] { "Label", "Button", "Tree", "TooltipLabel" })
         {
             theme.SetColor("font_color", type, new Color("eee5cf"));
             theme.SetColor("font_hover_color", type, new Color("fff2cd"));
             theme.SetColor("font_pressed_color", type, new Color("f2d68d"));
             theme.SetColor("font_disabled_color", type, new Color("83918d"));
         }
-        theme.SetStylebox("panel", "PopupMenu", Surface("1b2b35", "83918d", 8));
-        theme.SetStylebox("hover", "PopupMenu", Surface("465c69", "d1ac60", 4));
-        theme.SetConstant("v_separation", "PopupMenu", 8);
-        theme.SetStylebox("panel", "TooltipPanel", Surface("1b2b35", "83918d", 8));
-        theme.SetStylebox("panel", "AcceptDialog", Surface("1b2b35", "83918d", 16));
-        var window = Surface("1b2b35", "83918d");
-        window.ExpandMarginTop = 32;
-        theme.SetStylebox("embedded_border", "Window", window);
-        theme.SetStylebox("embedded_unfocused_border", "Window", window);
-        theme.SetColor("title_color", "Window", new Color("eee5cf"));
-        theme.SetConstant("title_height", "Window", 32);
+        theme.SetStylebox("panel", "TooltipPanel", Surface("1b2b35", "83918d", 10));
+        var separator = new StyleBoxLine { Color = new Color("405662"), Thickness = 1, ContentMarginTop = 5, ContentMarginBottom = 5 };
+        theme.SetStylebox("separator", "HSeparator", separator);
+        theme.SetConstant("separation", "HSeparator", 10);
+        theme.SetConstant("v_separation", "Tree", 8);
+        theme.SetConstant("h_separation", "Tree", 8);
         theme.SetStylebox("panel", "Tree", Surface("14232b", "526c75", 6));
         theme.SetStylebox("selected", "Tree", Surface("465c69", "d1ac60", 2));
         theme.SetStylebox("selected_focus", "Tree", Surface("465c69", "d1ac60", 2));
-        theme.SetStylebox("title_button_normal", "Tree", Surface("2e4351", "526c75", 4));
+        var heading = new StyleBoxFlat
+        {
+            BgColor = new Color("2e4351"),
+            BorderColor = new Color("526c75"),
+            BorderWidthBottom = 1,
+            ContentMarginLeft = 8,
+            ContentMarginRight = 8,
+            ContentMarginTop = 6,
+            ContentMarginBottom = 6
+        };
+        foreach (string state in new[] { "normal", "hover", "pressed" }) theme.SetStylebox("title_button_" + state, "Tree", heading);
         return theme;
     }
 

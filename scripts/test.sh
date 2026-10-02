@@ -91,5 +91,7 @@ PY
     cp "$sandbox_dir/userdata/SlayTheSpire2/slpp-ui.png" artifacts/validation/interface.png
     cp "$sandbox_dir/userdata/SlayTheSpire2/slpp-toolbar.png" artifacts/validation/toolbar.png
     cp "$sandbox_dir/userdata/SlayTheSpire2/slpp-help.png" artifacts/validation/shortcuts-help.png
+    cp "$sandbox_dir/userdata/SlayTheSpire2/slpp-menu.png" artifacts/validation/menu.png
+    cp "$sandbox_dir/userdata/SlayTheSpire2/slpp-hover.png" artifacts/validation/hover.png
   fi
 done
