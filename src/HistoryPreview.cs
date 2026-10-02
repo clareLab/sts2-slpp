@@ -39,7 +39,7 @@ internal static class HistoryPreview
             if (slot.HasValue && GameBridge.State?.GetPlayer(evt.playerId!.Value)?.PotionSlots.ElementAtOrDefault((int)slot.Value) is { } potion)
                 return command with { Potion = JsonSerializer.Serialize(potion.ToSerializable((int)slot.Value), JsonSerializationUtility.GetTypeInfo<SerializablePotion>()) };
         }
-        catch (Exception error) { GD.PrintErr("[slpp] Preview capture unavailable: " + error.Message); }
+        catch (Exception error) { ModLog.Error("Preview capture unavailable", error); }
         return command;
     }
 
@@ -113,7 +113,7 @@ internal static class HistoryPreview
             Clear();
             _hovered = key;
             _attempted = true;
-            GD.PrintErr("[slpp] Preview unavailable: " + error.Message);
+            ModLog.Error("Preview unavailable", error);
         }
     }
 

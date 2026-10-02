@@ -190,6 +190,14 @@ internal static class SelfTests
         CompleteHandChoice();
         await Settle("recovered opening choice");
         Check(!Recorder.Faulted && GameBridge.Stable, "recovered opening choice can continue the combat");
+        await Recorder.Restore(index, Recorder.History.PointCursor);
+        var next = GameBridge.State!.Map!.GetAllMapPoints().Where(p => p.PointType == MapPointType.Monster && !p.coord.Equals(room.coord)).OrderBy(p => p.coord.row).First();
+        await GameBridge.Manager.EnterMapCoord(next.coord);
+        await GameBridge.Until(() => GameBridge.ChoiceOpen, "next room opening choice after restore");
+        CompleteHandChoice();
+        await Settle("next room choice recorded");
+        Check(!Recorder.Faulted && Recorder.History.RoomCursor == index + 1 && Recorder.Room!.Choices.Count > 0,
+            "a fresh room clears the restored cursor before its opening choice is recorded");
     }
 
     private static void CompleteHandChoice(bool last = false)
@@ -666,6 +674,24 @@ internal static class SelfTests
         for (int i = 0; i < 5; i++) await GameBridge.Frame();
         GD.Print($"[slpp] FIT width={tree.GetColumnWidth(2)} font={item.GetCustomFontSize(2)} empty={item.GetCustomFontSize(0)} height={tree.GetItemAreaRect(item, 2).Size.Y} minimum={item.CustomMinimumHeight} line={tree.GetThemeFont("font").GetHeight(20)}");
         Check(item.GetCustomFontSize(2) == 14 && item.GetCustomFontSize(0) == 20 && tree.GetItemAreaRect(item, 2).Size.Y > tree.GetThemeFont("font").GetHeight(20) * 3, "long cells fit independently and keep their full height");
+        var font = tree.GetThemeFont("font");
+        float width = Math.Max(font.GetStringSize("Rest", fontSize: 20).X, font.GetStringSize("site", fontSize: 20).X) + 2;
+        Check(Ui.FitFont(font, "Rest site", width) == 20 && item.GetAutowrapMode(2) == TextServer.AutowrapMode.Word,
+            "wrapping keeps whole words at the original font size when they fit on separate lines");
+        int size = Ui.FitFont(font, "Decimillipede", width);
+        Check(size < 20 && font.GetStringSize("Decimillipede", fontSize: size).X <= width,
+            "an oversized single word shrinks to fit without being split or clipped");
+        var error = new InvalidOperationException("Log fixture");
+        ModLog.Error("Recording paused", error);
+        int version = ModLog.Version;
+        ModLog.Error("Action failed", error);
+        Check(ModLog.Version == version && ModLog.Unread, "propagated errors appear once and mark the log unread");
+        ModLog.Acknowledge(version);
+        Check(!ModLog.Unread, "reading the log clears its error notice");
+        for (int i = 0; i < 70; i++) ModLog.Info("Message " + i);
+        var snapshot = ModLog.Snapshot();
+        Check(snapshot.Messages.Length == 64 && snapshot.Messages[0].Text == "Message 69" && !ModLog.Unread,
+            "the session log is bounded, newest first, and routine messages do not raise a notice");
         tree.QueueFree();
     }
 
@@ -707,7 +733,7 @@ internal static class SelfTests
         var restore = Recorder.Restore(Recorder.History!.RoomCursor, Recorder.History.PointCursor);
         await GameBridge.Until(() => restore.IsCompleted || GameBridge.Singleplayer, "restore status visible");
         Hud.Tick();
-        Check(Recorder.Busy && Widget<Control>("SlppSpinner").Visible && !Widget<Label>("SlppStatus").Visible, "restore uses an animated indicator without status text");
+        Check(Recorder.Busy && Widget<Control>("SlppSpinner").Visible && !GameBridge.Descendants(root).Any(n => n.Name == "SlppStatus"), "restore uses an animated indicator without status text");
         await root.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
         root.GetTexture().GetImage().SavePng(ProjectSettings.GlobalizePath("user://slpp-restoring.png"));
         await restore;
@@ -738,7 +764,34 @@ internal static class SelfTests
         for (int i = 0; i < 8; i++) await GameBridge.Frame();
         Check(!shortcuts.Visible && !Hud.ModalOpen, "shortcut dialog closes and releases input");
         var toolbar = Widget<PanelContainer>("SlppToolbar");
-        Check(toolbar.Size.X < 300 && toolbar.Size.Y < 55, "idle toolbar remains a compact single row");
+        Check(toolbar.Size.X < 420 && toolbar.Size.Y < 55, "idle toolbar keeps all seven actions in a compact single row");
+        foreach (var shortcut in new[] { Shortcut.RestartRoom, Shortcut.RestartSeed, Shortcut.RandomSeed })
+        {
+            var button = Widget<Button>("SlppToolbar" + shortcut);
+            Check(button.Visible && button.Text == "" && button.GetNodeOrNull<TextureRect>("Icon")?.Texture != null && button.TooltipText.StartsWith(SlppConfig.Name(shortcut), StringComparison.Ordinal),
+                shortcut + " has a native toolbar icon and a descriptive tooltip");
+        }
+        SlppConfig.RoomRestart = SlppConfig.QuickRestart = false;
+        Hud.Tick();
+        Check(!Widget<Button>("SlppToolbarRestartRoom").Visible && !Widget<Button>("SlppToolbarRestartSeed").Visible && !Widget<Button>("SlppToolbarRandomSeed").Visible,
+            "restart toolbar icons follow the component switches");
+        SlppConfig.RoomRestart = SlppConfig.QuickRestart = true;
+        Hud.Tick();
+        for (int i = 0; i < 3; i++) await GameBridge.Frame();
+        var toolbarSize = toolbar.Size;
+        ModLog.Error("Recording paused", new InvalidOperationException("The previous room could not be replayed. Choose another step or restart the room."));
+        for (int i = 0; i < 3; i++) await GameBridge.Frame();
+        Check(Widget<Control>("SlppLogNotice").Visible && toolbar.Size == toolbarSize, "new errors mark the menu without adding text or resizing the toolbar");
+        Press("SlppOpenLog");
+        for (int i = 0; i < 5; i++) await GameBridge.Frame();
+        var log = Widget<PanelContainer>("SlppLog");
+        Check(log.Visible && !Widget<Control>("SlppLogNotice").Visible && GameBridge.Descendants(log).OfType<Label>().Any(l => l.Text.Contains("Recording paused")),
+            "the log opens from the menu and acknowledges its visible messages");
+        await root.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+        root.GetTexture().GetImage().SavePng(ProjectSettings.GlobalizePath("user://slpp-log.png"));
+        Press("SlppLogBack");
+        Check(Widget<PanelContainer>("SlppMenu").Visible && !log.Visible, "the log returns to the menu");
+        Press("SlppMenuButton");
         var origin = toolbar.Position;
         var handle = Widget<Label>("SlppDragHandle");
         Vector2 start = handle.GetGlobalRect().GetCenter();
@@ -827,9 +880,23 @@ internal static class SelfTests
         var history = Widget<PanelContainer>("SlppHistory");
         var points = Widget<Tree>("SlppPoints");
         var rooms = Widget<Tree>("SlppRooms");
-        Check(Math.Abs(Widget<Label>("SlppHistoryTitle").GetGlobalRect().Position.X - rooms.GetGlobalRect().Position.X) < 1 &&
-            Math.Abs(Widget<Button>("SlppHistoryClose").GetGlobalRect().End.X - points.GetGlobalRect().End.X) < 1,
-            "history heading and controls align with both lists");
+        var background = new Button { Position = new Vector2(1000, 400), Size = new Vector2(80, 40) };
+        root.AddChild(background);
+        bool clicked = false;
+        background.Pressed += () => clicked = true;
+        await GameBridge.Frame();
+        var backgroundPoint = background.GetGlobalRect().GetCenter();
+        root.PushInput(new InputEventMouseButton { Position = backgroundPoint, GlobalPosition = backgroundPoint, ButtonIndex = MouseButton.Left, Pressed = true, ButtonMask = MouseButtonMask.Left }, true);
+        root.PushInput(new InputEventMouseButton { Position = backgroundPoint, GlobalPosition = backgroundPoint, ButtonIndex = MouseButton.Left, Pressed = false }, true);
+        Check(clicked && history.Visible && !Hud.ModalOpen && !Widget<ColorRect>("SlppInputShield").Visible,
+            "outside clicks reach the game layer and leave history open");
+        root.RemoveChild(background);
+        background.QueueFree();
+        var load = Widget<Button>("SlppLoad");
+        Check(!GameBridge.Descendants(history).Any(n => n.Name == "SlppHistoryTitle") && rooms.Position.Y == points.Position.Y,
+            "history opens directly with aligned lists and no redundant title row");
+        Check(load.Text == "LOAD" && Math.Abs(load.GetGlobalRect().Position.X - rooms.GetGlobalRect().Position.X) < 1 &&
+            Math.Abs(load.GetGlobalRect().End.X - points.GetGlobalRect().End.X) < 1, "LOAD spans the full width of both lists");
         Check(points.HideFolding && rooms.HideFolding && points.GetThemeConstant("inner_item_margin_right") == points.GetThemeConstant("h_separation"),
             "flat history columns have symmetric text insets");
         foreach (var list in new[] { rooms, points })

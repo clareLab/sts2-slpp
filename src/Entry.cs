@@ -22,14 +22,14 @@ public static class Entry
         catch (Exception e)
         {
             harmony.UnpatchAll(harmony.Id);
-            GD.PrintErr("[slpp] Incompatible game API. Mod disabled: " + e);
+            ModLog.Error("Incompatible game API. Mod disabled", e);
             return;
         }
         ((SceneTree)Engine.GetMainLoop()).ProcessFrame += Tick;
         ((SceneTree)Engine.GetMainLoop()).Root.TreeExiting += () =>
         {
             try { Recorder.OnCleanup(); }
-            catch (Exception error) { GD.PrintErr("[slpp] Cleanup failed: " + error); }
+            catch (Exception error) { ModLog.Error("Cleanup failed", error); }
         };
         GD.Print($"[slpp] Loaded {typeof(Entry).Assembly.GetName().Version?.ToString(3)}");
     }
@@ -48,12 +48,12 @@ public static class Entry
         if (!_hudFailed)
         {
             try { Hud.Tick(); }
-            catch (Exception error) { _hudFailed = true; Hud.Disable(); GD.PrintErr("[slpp] Toolbar disabled: " + error); }
+            catch (Exception error) { _hudFailed = true; Hud.Disable(); ModLog.Error("Toolbar disabled", error); }
         }
         if (_started || NGame.Instance?.MainMenu == null || !SaveManager.Instance.IsProfileInitialized) return;
         _started = true;
         try { SlppConfig.InstallLabels(); Hud.Install(); }
-        catch (Exception error) { _hudFailed = true; Hud.Disable(); GD.PrintErr("[slpp] Toolbar unavailable: " + error); }
+        catch (Exception error) { _hudFailed = true; Hud.Disable(); ModLog.Error("Toolbar unavailable", error); }
         GD.Print("[slpp] Main menu ready");
         if (SelfTest) _ = SelfTests.Run();
     }

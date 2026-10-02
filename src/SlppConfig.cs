@@ -17,7 +17,6 @@ public sealed class SlppConfig : SimpleModConfig
     public static bool RoomRestart { get; set; } = true;
     public static bool QuickRestart { get; set; } = true;
     public static bool Timeline { get; set; } = true;
-    public static bool Status { get; set; } = true;
     public static bool Hotkeys { get; set; } = true;
 
     [ConfigSection("Display")]

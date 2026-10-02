@@ -25,7 +25,6 @@ internal static class Recorder
     internal static bool WaitingForChoice { get; private set; }
     internal static bool BlocksLiveActions => Restoring || _resumePending;
     internal static GameAction? ReplayingAction { get; private set; }
-    internal static string Status { get; private set; } = "Start a single-player run";
     internal static string? LastError { get; private set; }
     private static int _replayChoice;
     private static TimelinePoint? _target;
@@ -74,7 +73,7 @@ internal static class Recorder
                 if (saved.GameBuild == GameBridge.Build && saved.ModelHash == ModelIdSerializationCache.Hash)
                 { TimelineText.Normalize(saved); History = saved; _detached = true; }
             }
-            catch (Exception e) { GD.PrintErr("[slpp] Archive could not be resumed: " + e.Message); }
+            catch (Exception e) { ModLog.Error("Archive could not be resumed", e); }
         }
         if (Entry.AllowAutoResume && _detached && History?.RunKey == key)
         {
@@ -99,6 +98,7 @@ internal static class Recorder
         History.Rooms.Add(room);
         History.RoomCursor = History.Rooms.Count - 1;
         History.PointCursor = 0;
+        _atHistoricalPosition = false;
         _needPoint = true;
         _stableFrames = 0;
         _detached = false;
@@ -178,7 +178,6 @@ internal static class Recorder
             else _stableFrames = 0;
         }
         if (_dirty && !Restoring && Environment.TickCount64 >= _flushAfter && _writeTask.IsCompleted) Flush();
-        if (_writeError != null && !Busy) Status = "History write failed: " + _writeError;
     }
 
     private static void AddPoint(bool choice, string label)
@@ -192,7 +191,6 @@ internal static class Recorder
             return;
         Room.Points.Add(point);
         History!.PointCursor = Room.Points.Count - 1;
-        Status = $"Step {History.PointCursor}";
         MarkDirty();
         GD.Print($"[slpp] Point {History.PointCursor}: {point.Label} cmd={point.Commands} choices={point.Choices} hash={point.Hash[..8]}");
     }
@@ -209,7 +207,7 @@ internal static class Recorder
             .ContinueWith(t =>
             {
                 _writeError = t.IsFaulted ? t.Exception!.GetBaseException().Message : null;
-                if (t.IsFaulted) GD.PrintErr("[slpp] History write failed: " + t.Exception);
+                if (t.IsFaulted) ModLog.Error("History write failed", t.Exception!.GetBaseException());
             });
     }
 
@@ -244,7 +242,6 @@ internal static class Recorder
         _generation++;
         _externalDepth = 0;
         LastError = null;
-        Status = "Restoring";
         _replayRoom = room;
         _target = target;
         _replayChoice = 0;
@@ -272,7 +269,7 @@ internal static class Recorder
             _atHistoricalPosition = true;
             Faulted = false;
             _needPoint = false;
-            Status = "Restored";
+            ModLog.Info($"Restored floor {room.Floor}, step {pointIndex}");
             GD.Print($"[slpp] RESTORE_OK Floor {room.Floor} Step {pointIndex} ({watch.ElapsedMilliseconds} ms)");
             MarkDirty();
             completed = true;
@@ -293,11 +290,11 @@ internal static class Recorder
                 History.RoomCursor = recoveryIndex;
                 History.PointCursor = 0;
                 _atHistoricalPosition = true;
-                Status = "Room reloaded. History paused.";
+                ModLog.Info("Room reloaded. Recording will resume in the next room or after a successful load.");
             }
             catch (Exception recoveryError)
             {
-                GD.PrintErr("[slpp] Room recovery failed: " + recoveryError);
+                ModLog.Error("Room recovery failed", recoveryError);
                 await MegaCrit.Sts2.Core.Nodes.NGame.Instance!.ReturnToMainMenu();
             }
             throw;
@@ -316,7 +313,7 @@ internal static class Recorder
             await SaveManager.Instance.IncrementNumReloads(GameBridge.ReadSave(room.Save), MegaCrit.Sts2.Core.Multiplayer.Game.NetGameType.Singleplayer);
             await FlushAsync();
         }
-        catch (Exception ex) { Status = "Restored, but saving failed: " + ex.Message; throw; }
+        catch (Exception ex) { ModLog.Error("Restored, but saving failed", ex); throw; }
         finally { Busy = false; }
     }
 
@@ -325,8 +322,7 @@ internal static class Recorder
         Faulted = true;
         _needPoint = _dirty = _resumePending = false;
         LastError = error.ToString();
-        Status = "History paused";
-        GD.PrintErr("[slpp] " + LastError);
+        ModLog.Error("Recording paused", error);
     }
 
     internal static void Capture(Action callback)
@@ -503,10 +499,9 @@ internal static class Recorder
                 TimelineText.Normalize(history);
                 History = history;
                 _detached = true;
-                Status = "History ready";
                 return;
             }
-            catch (Exception e) { GD.PrintErr("[slpp] Cannot read " + Path.GetFileName(path) + ": " + e.Message); }
+            catch (Exception e) { ModLog.Error("Cannot read " + Path.GetFileName(path), e); }
         }
     }
 

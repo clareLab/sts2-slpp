@@ -144,6 +144,6 @@ internal static class ShortcutInputPatch
             __instance.GetViewport().SetInputAsHandled();
             return false;
         }
-        catch (Exception error) { Hud.Disable(); Godot.GD.PrintErr("[slpp] Shortcuts disabled: " + error); return true; }
+        catch (Exception error) { Hud.Disable(); ModLog.Error("Shortcuts disabled", error); return true; }
     }
 }

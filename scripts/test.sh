@@ -50,6 +50,7 @@ if [[ "$mode" == ui ]]; then
   command -v Xvfb >/dev/null || { echo 'Xvfb is required for UI tests.' >&2; exit 1; }
   read -r -a suites <<< "${SLPP_TEST_SUITES:-ui}"
   display_file="$sandbox_dir/display"
+  : > "$display_file"
   Xvfb -displayfd 3 -screen 0 1280x720x24 -nolisten tcp 3> "$display_file" > artifacts/validation/display.log 2>&1 &
   display_pid=$!
   trap 'kill "$display_pid" 2>/dev/null || true; wait "$display_pid" 2>/dev/null || true' EXIT
@@ -61,6 +62,7 @@ if [[ "$mode" == ui ]]; then
   [[ -s "$display_file" ]] || { echo 'Xvfb did not become ready.' >&2; exit 1; }
   DISPLAY=":$(< "$display_file")"
   export DISPLAY
+  unset WAYLAND_DISPLAY
 fi
 for suite in "${suites[@]}"; do
     case "$suite" in full|resume|settings|settings-resume|ui|world|characters|crystal|potions|choices|transitions|archive|layout|preview|lifecycle|typesetting) ;; *) echo "Unknown test suite: $suite" >&2; exit 2 ;; esac

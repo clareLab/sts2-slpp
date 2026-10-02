@@ -11,6 +11,7 @@ internal static class Ui
     internal const string KeysIcon = "res://images/ui/keyboard_icon_ninepatch.png";
     internal const string PositionIcon = "res://images/atlases/ui_atlas.sprites/top_bar/top_bar_map.tres";
     internal const string MenuIcon = "res://images/atlases/ui_atlas.sprites/top_bar/top_bar_settings.tres";
+    internal const string LogIcon = "res://images/atlases/relic_atlas.sprites/history_course.tres";
 
     internal static Label Text(string text, int size = 20)
     {
@@ -22,7 +23,7 @@ internal static class Ui
     internal static Label WrappedText(string text, int size, float width)
     {
         var label = Text(text, size);
-        label.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        label.AutowrapMode = TextServer.AutowrapMode.Word;
         label.CustomMinimumSize = new Vector2(width, 0);
         label.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         label.VerticalAlignment = VerticalAlignment.Center;
@@ -39,8 +40,10 @@ internal static class Ui
     {
         if (width <= 0) return size;
         while (size > 14 && font.GetMultilineStringSize(text, width: width, fontSize: size,
-            brkFlags: TextServer.LineBreakFlag.Mandatory | TextServer.LineBreakFlag.WordBound | TextServer.LineBreakFlag.Adaptive).Y > font.GetHeight(size) * lines + 1)
+            brkFlags: TextServer.LineBreakFlag.Mandatory | TextServer.LineBreakFlag.WordBound).Y > font.GetHeight(size) * lines + 1)
             size--;
+        var words = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        while (size > 1 && words.Any(word => font.GetStringSize(word, fontSize: size).X > width)) size--;
         return size;
     }
 
@@ -67,12 +70,12 @@ internal static class Ui
                 float width = tree.GetColumnWidth(column) - 16;
                 if (item.GetIcon(column) is { } icon) width -= Math.Min(icon.GetWidth(), item.GetIconMaxWidth(column)) + 8;
                 width = Math.Max(1, width);
-                item.SetAutowrapMode(column, TextServer.AutowrapMode.WordSmart);
+                item.SetAutowrapMode(column, TextServer.AutowrapMode.Word);
                 item.SetTextOverrunBehavior(column, TextServer.OverrunBehavior.NoTrimming);
                 int size = FitFont(font, item.GetText(column), width);
                 item.SetCustomFontSize(column, size);
                 height = Math.Max(height, font.GetMultilineStringSize(item.GetText(column), width: width, fontSize: size,
-                    brkFlags: TextServer.LineBreakFlag.Mandatory | TextServer.LineBreakFlag.WordBound | TextServer.LineBreakFlag.Adaptive).Y);
+                    brkFlags: TextServer.LineBreakFlag.Mandatory | TextServer.LineBreakFlag.WordBound).Y);
             }
             item.CustomMinimumHeight = (int)Math.Ceiling(height);
         }
@@ -114,7 +117,8 @@ internal static class Ui
     {
         Shortcut.PreviousTurn => "res://images/atlases/ui_atlas.sprites/settings_tiny_left_arrow.tres",
         Shortcut.NextTurn => "res://images/atlases/ui_atlas.sprites/settings_tiny_right_arrow.tres",
-        Shortcut.RestartSeed => "res://images/atlases/ui_atlas.sprites/top_bar/top_bar_floor.tres",
+        Shortcut.RestartRoom => "res://images/atlases/ui_atlas.sprites/top_bar/top_bar_floor.tres",
+        Shortcut.RestartSeed => PositionIcon,
         Shortcut.RandomSeed => "res://images/packed/statistics_screen/stats_questionmark.png",
         Shortcut.Timeline => "res://images/atlases/ui_atlas.sprites/top_bar/timer_icon.tres",
         _ => BackIcon

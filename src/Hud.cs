@@ -9,7 +9,10 @@ internal static class Hud
     private static PanelContainer _panel = null!;
     private static Control _spinner = null!;
     private static ProgressBar _progress = null!;
-    private static Label _status = null!;
+    private static Control _logNotice = null!;
+    private static PanelContainer _log = null!;
+    private static VBoxContainer _messages = null!;
+    private static int _logVersion = -1;
     private static Button _historyButton = null!;
     private static Control _resizeHandle = null!;
     private static bool _resizing;
@@ -29,13 +32,15 @@ internal static class Hud
     private static ColorRect _shield = null!;
     private static PanelContainer? _flyout;
     private static readonly Dictionary<Shortcut, (Button Button, Label Key)> MenuItems = [];
+    private static readonly Dictionary<Shortcut, Button> RestartButtons = [];
     private static readonly Dictionary<Shortcut, Label> Bindings = [];
     private static readonly HashSet<Key> Held = [];
     private static string _listVersion = "";
     private static bool _dragging;
     private static bool _disabled;
     private static Vector2 _dragOffset;
-    internal static bool ModalOpen => GodotObject.IsInstanceValid(_flyout) && _flyout!.Visible;
+    private static bool FlyoutOpen => GodotObject.IsInstanceValid(_flyout) && _flyout!.Visible;
+    internal static bool ModalOpen => FlyoutOpen && _flyout != _history;
 
     internal static void Install()
     {
@@ -70,14 +75,26 @@ internal static class Hud
         _redo = Ui.Button("Redo", () => Run(() => Execute(Shortcut.Redo)), "SlppRedo", flip: true);
         row.AddChild(_undo);
         row.AddChild(_redo);
+        foreach (var shortcut in new[] { Shortcut.RestartRoom, Shortcut.RestartSeed, Shortcut.RandomSeed })
+        {
+            var button = new Button { Name = "SlppToolbar" + shortcut };
+            Ui.Icon(button, Ui.ShortcutIcon(shortcut), SlppConfig.Name(shortcut));
+            button.Pressed += () => Run(() => Execute(shortcut));
+            row.AddChild(button);
+            RestartButtons.Add(shortcut, button);
+        }
         _menuButton = new Button { Name = "SlppMenuButton", ToggleMode = true };
         Ui.Icon(_menuButton, Ui.MenuIcon, "Menu");
-        _menuButton.Pressed += () => { if (_flyout == _menu && ModalOpen) CloseFlyout(); else ShowFlyout(_menu); };
+        _menuButton.Pressed += () => { if (_flyout == _menu && FlyoutOpen) CloseFlyout(); else ShowFlyout(_menu); };
         _historyButton = new Button { Name = "SlppTimeline", ToggleMode = true };
         Ui.Icon(_historyButton, Ui.ShortcutIcon(Shortcut.Timeline), "History");
         _historyButton.Pressed += () => Run(() => Execute(Shortcut.Timeline));
         row.AddChild(_historyButton);
         row.AddChild(_menuButton);
+        _logNotice = new Control { Name = "SlppLogNotice", MouseFilter = Control.MouseFilterEnum.Ignore, Visible = false };
+        _menuButton.AddChild(_logNotice);
+        _logNotice.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+        _logNotice.Draw += () => _logNotice.DrawCircle(new Vector2(_logNotice.Size.X - 6, 6), 3, new Color("f2d68d"));
         _spinner = new Control { Name = "SlppSpinner", CustomMinimumSize = new Vector2(32, 40), MouseFilter = Control.MouseFilterEnum.Stop };
         _spinner.Draw += () =>
         {
@@ -90,9 +107,6 @@ internal static class Hud
         _progress.AddThemeStyleboxOverride("background", new StyleBoxFlat { BgColor = new Color("23323a") });
         _progress.AddThemeStyleboxOverride("fill", new StyleBoxFlat { BgColor = new Color("d1ac60") });
         box.AddChild(_progress);
-        _status = Ui.Text("", 16);
-        _status.Name = "SlppStatus";
-        box.AddChild(_status);
         _menu = Sheet("SlppMenu", 344, out var menu);
         menu.AddThemeConstantOverride("separation", 2);
         foreach (var shortcut in new[] { Shortcut.PreviousTurn, Shortcut.NextTurn, Shortcut.RestartRoom, Shortcut.RestartSeed, Shortcut.RandomSeed })
@@ -104,10 +118,10 @@ internal static class Hud
         }
         menu.AddChild(new HSeparator());
         menu.AddChild(Ui.MenuRow("Shortcuts", Ui.KeysIcon, () => ShowFlyout(_shortcuts), "SlppShortcuts").Button);
+        menu.AddChild(Ui.MenuRow("Log", Ui.LogIcon, () => ShowFlyout(_log), "SlppOpenLog").Button);
         menu.AddChild(new HSeparator());
         menu.AddChild(Ui.MenuRow("Reset position", Ui.PositionIcon, () => { ResetPosition(); CloseFlyout(); }, "SlppResetPosition").Button);
         _history = Sheet("SlppHistory", 568, out var history);
-        Header(history, "History");
         var lists = new HBoxContainer { SizeFlagsVertical = Control.SizeFlags.ExpandFill };
         lists.AddThemeConstantOverride("separation", 12);
         history.AddChild(lists);
@@ -118,10 +132,9 @@ internal static class Hud
         _points.GuiInput += input => HistoryPreview.Input(_points, input);
         _points.MouseExited += HistoryPreview.Leave;
         _rooms.ItemSelected += () => PopulatePoints(_rooms.GetSelected().GetMetadata(0).AsInt32());
-        var footer = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.End };
-        history.AddChild(footer);
-        _load = Ui.TextButton("Load", LoadSelected, "SlppLoad");
-        footer.AddChild(_load);
+        _load = Ui.TextButton("LOAD", LoadSelected, "SlppLoad");
+        _load.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        history.AddChild(_load);
         _resizeHandle = new Control { Name = "SlppHistoryResize", CustomMinimumSize = new Vector2(0, 12), MouseFilter = Control.MouseFilterEnum.Stop, MouseDefaultCursorShape = Control.CursorShape.Vsize, TooltipText = "Drag to resize" };
         _resizeHandle.Draw += () =>
         {
@@ -150,6 +163,18 @@ internal static class Hud
             keys.AddChild(key);
             Bindings.Add(shortcut, key);
         }
+        _log = Sheet("SlppLog", 480, out var log);
+        Header(log, "Log");
+        var scroll = new ScrollContainer
+        {
+            CustomMinimumSize = new Vector2(0, 240),
+            HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled,
+            VerticalScrollMode = ScrollContainer.ScrollMode.ShowAlways
+        };
+        log.AddChild(scroll);
+        _messages = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+        _messages.AddThemeConstantOverride("separation", 10);
+        scroll.AddChild(_messages);
     }
 
     private static PanelContainer Sheet(string name, int width, out VBoxContainer content)
@@ -174,13 +199,10 @@ internal static class Hud
         label.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         label.VerticalAlignment = VerticalAlignment.Center;
         row.AddChild(label);
-        if (title != "History")
-        {
-            var back = Ui.Button("Back", () => ShowFlyout(_menu), "Slpp" + title + "Back");
-            back.CustomMinimumSize = new Vector2(28, 28);
-            back.Flat = true;
-            row.AddChild(back);
-        }
+        var back = Ui.Button("Back", () => ShowFlyout(_menu), "Slpp" + title + "Back");
+        back.CustomMinimumSize = new Vector2(28, 28);
+        back.Flat = true;
+        row.AddChild(back);
         var close = new Button { Name = "Slpp" + title + "Close" };
         Ui.Icon(close, Ui.CloseIcon, "Close");
         close.CustomMinimumSize = new Vector2(28, 28);
@@ -196,11 +218,35 @@ internal static class Hud
         _flyout?.Hide();
         _flyout = panel;
         panel.Show();
+        if (panel == _log) RefreshLog();
         _menuButton.SetPressedNoSignal(panel == _menu);
         _historyButton.SetPressedNoSignal(panel == _history);
         _shield.Color = Colors.Transparent;
-        _shield.Show();
+        _shield.Visible = ModalOpen;
         PositionFlyout();
+    }
+
+    private static void RefreshLog()
+    {
+        if (_logVersion != ModLog.Version)
+        {
+            var snapshot = ModLog.Snapshot();
+            _logVersion = snapshot.Version;
+            foreach (var child in _messages.GetChildren()) { _messages.RemoveChild(child); child.QueueFree(); }
+            if (snapshot.Messages.Length == 0) _messages.AddChild(Ui.Text("No messages", 18));
+            foreach (var message in snapshot.Messages)
+            {
+                var entry = new VBoxContainer();
+                entry.AddThemeConstantOverride("separation", 3);
+                var time = Ui.Text(message.Time.ToString("HH:mm:ss"), 14);
+                time.Modulate = new Color(message.Error ? "f2d68d" : "83918d");
+                entry.AddChild(time);
+                entry.AddChild(Ui.WrappedText(message.Text, 18, 1));
+                _messages.AddChild(entry);
+            }
+        }
+        ModLog.Acknowledge(_logVersion);
+        _logNotice.Hide();
     }
 
     private static void CloseFlyout()
@@ -216,7 +262,7 @@ internal static class Hud
 
     private static void PositionFlyout()
     {
-        if (!ModalOpen) return;
+        if (!FlyoutOpen) return;
         Vector2 viewport = _panel.GetViewportRect().Size;
         _flyout!.Size = _flyout.GetCombinedMinimumSize();
         if (_flyout == _history)
@@ -280,7 +326,7 @@ internal static class Hud
     internal static async void Run(Func<Task> callback)
     {
         try { await callback(); }
-        catch (Exception e) { GD.PrintErr("[slpp] " + e.Message); }
+        catch (Exception e) { ModLog.Error("Action failed", e); }
     }
 
     private static Task Execute(Shortcut shortcut)
@@ -288,7 +334,7 @@ internal static class Hud
         if (Recorder.Busy || SlppConfig.IsOpen) return Task.CompletedTask;
         if (shortcut == Shortcut.Timeline)
         {
-            if (_flyout == _history && ModalOpen) CloseFlyout(); else ShowFlyout(_history);
+            if (_flyout == _history && FlyoutOpen) CloseFlyout(); else ShowFlyout(_history);
             return Task.CompletedTask;
         }
         CloseFlyout();
@@ -359,7 +405,7 @@ internal static class Hud
         if (!key.Pressed && Held.Remove(key.Keycode)) return true;
         if (!NGame.IsGameFocusedWindow()) { Held.Clear(); return false; }
         if (SlppConfig.IsOpen) return false;
-        if (ModalOpen && key.Keycode == Key.Escape)
+        if (FlyoutOpen && key.Keycode == Key.Escape)
         {
             if (key.Pressed && !key.Echo) { Held.Add(key.Keycode); CloseFlyout(); }
             return true;
@@ -393,10 +439,8 @@ internal static class Hud
         if (Recorder.Busy) _spinner.QueueRedraw();
         _progress.Visible = Recorder.Busy && Recorder.OperationTotal > 0;
         _progress.Value = Recorder.OperationTotal > 0 ? (double)Recorder.OperationStep / Recorder.OperationTotal : 0;
-        _status.Text = "History paused";
-        _status.TooltipText = Recorder.Faulted ? Recorder.Status : "";
-        _status.MouseFilter = Control.MouseFilterEnum.Pass;
-        _status.Visible = !Recorder.Busy && SlppConfig.Status && Recorder.Faulted;
+        if (_log.Visible) RefreshLog();
+        _logNotice.Visible = ModLog.Unread;
         _shield.Visible = Recorder.Busy || ModalOpen;
         _shield.Color = Recorder.Busy ? new Color(0, 0, 0, .2f) : Colors.Transparent;
         _undo.Visible = _redo.Visible = SlppConfig.Actions;
@@ -406,6 +450,12 @@ internal static class Hud
         _load.Disabled = Recorder.Busy || _rooms.GetSelected() == null || _points.GetSelected() == null;
         _undo.TooltipText = Tip(Shortcut.Undo);
         _redo.TooltipText = Tip(Shortcut.Redo);
+        foreach (var pair in RestartButtons)
+        {
+            pair.Value.Visible = SlppConfig.Enabled(pair.Key);
+            pair.Value.Disabled = Recorder.Busy;
+            pair.Value.TooltipText = Tip(pair.Key);
+        }
         foreach (var pair in MenuItems)
         {
             pair.Value.Button.Disabled = Recorder.Busy || !SlppConfig.Enabled(pair.Key);
@@ -522,6 +572,7 @@ internal static class Hud
         if (GodotObject.IsInstanceValid(_shield)) _shield.Visible = false;
         if (GodotObject.IsInstanceValid(_history)) _history.Hide();
         if (GodotObject.IsInstanceValid(_shortcuts)) _shortcuts.Hide();
+        if (GodotObject.IsInstanceValid(_log)) _log.Hide();
         if (GodotObject.IsInstanceValid(_menu)) _menu.Hide();
         _flyout = null;
     }
