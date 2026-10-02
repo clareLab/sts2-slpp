@@ -376,11 +376,27 @@ internal static class SelfTests
         var result = SaveManager.Instance.LoadRunSave();
         var save = result.SaveData!;
         var state = RunState.FromSerializable(save);
+        Check(GameBridge.Manager.NetService == null, "fresh process has no run service before Continue");
+        var stateProperty = AccessTools.Property(typeof(RunManager), "State");
+        stateProperty.SetValue(GameBridge.Manager, state);
+        try
+        {
+            AccessTools.Method(typeof(Entry), "Tick").Invoke(null, null);
+            Check(!GameBridge.Singleplayer && !GameBridge.Stable && !Recorder.Faulted, "partial run initialization does not fault the mod");
+            Check(!Widget<PanelContainer>("SlppToolbar").IsVisibleInTree(), "toolbar waits while the run service is unavailable");
+        }
+        finally { stateProperty.SetValue(GameBridge.Manager, null); }
         await GameBridge.Manager.SetUpSavedSingleplayer(state, save);
         await NGame.Instance!.LoadRun(state, save.PreFinishedRoom);
         await GameBridge.Until(() => !Recorder.Busy && GameBridge.Fingerprint() == expected.GetProperty("hash").GetString(), "automatic resume", 45);
         Check(Recorder.History!.RoomCursor == expected.GetProperty("room").GetInt32() && Recorder.History.PointCursor == expected.GetProperty("point").GetInt32(), "cursor restored after process restart");
         Check(GameBridge.Fingerprint() == expected.GetProperty("hash").GetString(), "full gameplay state restored after process restart");
+        Hud.Tick();
+        Check(Widget<PanelContainer>("SlppToolbar").IsVisibleInTree(), "toolbar appears after Continue finishes initializing");
+        Press("SlppShortcuts");
+        await GameBridge.Frame();
+        Check(Widget<AcceptDialog>("SlppShortcutList").Visible, "toolbar menu works after Continue");
+        Widget<AcceptDialog>("SlppShortcutList").Hide();
         GD.Print("[slpp] SELFTEST_RESUME_OK");
     }
 

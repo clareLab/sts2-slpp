@@ -28,7 +28,7 @@ internal static class GameBridge
 {
     internal static RunManager Manager => RunManager.Instance;
     internal static RunState? State => Manager.DebugOnlyGetState();
-    internal static bool Singleplayer => State != null && Manager.NetService.Type == NetGameType.Singleplayer;
+    internal static bool Singleplayer => State != null && !Manager.IsCleaningUp && Manager.NetService?.Type == NetGameType.Singleplayer;
     internal static string Build => ReleaseInfoManager.Instance.ReleaseInfo?.Commit ?? "unknown";
     internal static bool InCombatRoom => State?.CurrentRoom is CombatRoom;
     internal static int Turn => InCombatRoom ? LocalContext.GetMe(State)?.PlayerCombatState?.TurnNumber ?? 0 : 0;
