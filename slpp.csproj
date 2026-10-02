@@ -18,6 +18,6 @@
   </ItemGroup>
   <Target Name="Package" AfterTargets="Build">
     <MakeDir Directories="$(MSBuildProjectDirectory)/dist/slpp" />
-    <Copy SourceFiles="$(TargetPath);$(MSBuildProjectDirectory)/slpp.json" DestinationFolder="$(MSBuildProjectDirectory)/dist/slpp" />
+    <Copy SourceFiles="$(TargetPath);$(MSBuildProjectDirectory)/slpp.json;$(MSBuildProjectDirectory)/LICENSE" DestinationFolder="$(MSBuildProjectDirectory)/dist/slpp" />
   </Target>
 </Project>

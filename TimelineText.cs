@@ -27,8 +27,11 @@ internal static class TimelineText
     internal static string Action(CombatReplayEvent evt) => evt.action switch
     {
         NetPlayCardAction play => Card(play.modelId),
-        NetEndPlayerTurnAction => "End turn", NetUsePotionAction => "Use potion", NetDiscardPotionGameAction => "Discard potion",
-        NetPickRelicAction => "Choose relic", _ => "Action"
+        NetEndPlayerTurnAction => "End turn",
+        NetUsePotionAction => "Use potion",
+        NetDiscardPotionGameAction => "Discard potion",
+        NetPickRelicAction => "Choose relic",
+        _ => "Action"
     };
 
     internal static void Normalize(Timeline history)
@@ -43,9 +46,15 @@ internal static class TimelineText
                 string label = command.Kind switch
                 {
                     "action" => Action(GameBridge.Unpack<CombatReplayEvent>(command.Data)),
-                    "chest" => "Open chest", "proceed" => "Return to event", "event" => "Event option " + (command.Index + 1),
-                    "rest" => "Rest option " + (command.Index + 1), "shop" => "Shop purchase", "reward" => "Claim reward",
-                    "skip-rewards" => "Skip rewards", "crystal" => "Crystal sphere", _ => "Action"
+                    "chest" => "Open chest",
+                    "proceed" => "Return to event",
+                    "event" => "Event option " + (command.Index + 1),
+                    "rest" => "Rest option " + (command.Index + 1),
+                    "shop" => "Shop purchase",
+                    "reward" => "Claim reward",
+                    "skip-rewards" => "Skip rewards",
+                    "crystal" => "Crystal sphere",
+                    _ => "Action"
                 };
                 room.Commands[i] = command with { Label = label };
             }

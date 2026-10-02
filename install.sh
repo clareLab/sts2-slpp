@@ -13,6 +13,6 @@ if [[ -d "$destination" ]]; then
   echo "Previous version backup: $backup"
 fi
 mkdir -p "$destination"
-cp dist/slpp/slpp.dll dist/slpp/slpp.json "$destination/"
+cp dist/slpp/slpp.dll dist/slpp/slpp.json dist/slpp/LICENSE "$destination/"
 echo "Installed: $destination"
 echo 'Enable BaseLib and Save & Load ++ in the game Mod menu.'

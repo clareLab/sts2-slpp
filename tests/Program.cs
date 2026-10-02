@@ -7,7 +7,10 @@ static void Check(bool condition, string message)
 }
 static Timeline Sample() => new()
 {
-    RunKey = "123-ABC", GameBuild = "test", RoomCursor = 0, PointCursor = 1,
+    RunKey = "123-ABC",
+    GameBuild = "test",
+    RoomCursor = 0,
+    PointCursor = 1,
     Rooms = [new RoomRecord
     {
         Save = "{}", Floor = 1, Commands = [new("action", [1]), new("shop", [], 1)],
@@ -17,7 +20,7 @@ static Timeline Sample() => new()
 };
 
 var timeline = TimelineFile.Decode(TimelineFile.Encode(Sample()));
-Check(timeline.Rooms.Count == 2 && timeline.Current!.Commands[0].Data.SequenceEqual(new byte[] {1}), "compressed roundtrip keeps binary commands and future rooms");
+Check(timeline.Rooms.Count == 2 && timeline.Current!.Commands[0].Data.SequenceEqual(new byte[] { 1 }), "compressed roundtrip keeps binary commands and future rooms");
 timeline.Branch();
 Check(timeline.Rooms.Count == 1 && timeline.Current!.Choices.Count == 0 && timeline.Current.Commands.Count == 1 && timeline.Current.Points.Count == 2, "branch at pending choice removes its result and all future rooms");
 
@@ -39,7 +42,7 @@ try
     TimelineFile.WriteAtomic(path, TimelineFile.Encode(Sample()));
     TimelineFile.WriteAtomic(path, TimelineFile.Encode(timeline));
     Check(TimelineFile.ReadWithBackup(path).Rooms.Count == 1, "atomic replacement uses latest archive");
-    File.WriteAllBytes(path, [0,1,2]);
+    File.WriteAllBytes(path, [0, 1, 2]);
     Check(TimelineFile.ReadWithBackup(path).Rooms.Count == 2, "corrupt primary falls back to previous committed archive");
 }
 finally { Directory.Delete(directory, true); }

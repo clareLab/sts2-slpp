@@ -27,9 +27,16 @@ internal static class Ui
         var panel = new PanelContainer();
         var style = new StyleBoxFlat
         {
-            BgColor = new Color("17201fee"), BorderColor = new Color("697364"),
-            BorderWidthBottom = 1, BorderWidthTop = 1, BorderWidthLeft = 1, BorderWidthRight = 1,
-            CornerRadiusTopLeft = 8, CornerRadiusTopRight = 8, CornerRadiusBottomLeft = 8, CornerRadiusBottomRight = 8
+            BgColor = new Color("17201fee"),
+            BorderColor = new Color("697364"),
+            BorderWidthBottom = 1,
+            BorderWidthTop = 1,
+            BorderWidthLeft = 1,
+            BorderWidthRight = 1,
+            CornerRadiusTopLeft = 8,
+            CornerRadiusTopRight = 8,
+            CornerRadiusBottomLeft = 8,
+            CornerRadiusBottomRight = 8
         };
         panel.AddThemeStyleboxOverride("panel", style);
         return panel;

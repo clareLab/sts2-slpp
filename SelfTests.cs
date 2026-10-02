@@ -137,7 +137,7 @@ internal static class SelfTests
         await Recorder.Restore(room, choice);
         string seed = GameBridge.State!.Rng.StringSeed;
         await Recorder.Restart(true);
-        await Settle("restart from selection");
+        await GameBridge.Until(() => GameBridge.Stable, "restart from selection");
         Check(GameBridge.State!.Rng.StringSeed != seed && !Recorder.Faulted && !GameBridge.ChoiceOpen, "random restart while a card choice is pending");
         GD.Print("[slpp] SELFTEST_CHOICES_OK");
     }
@@ -358,7 +358,7 @@ internal static class SelfTests
         GameBridge.Manager.EventSynchronizer.ChooseLocalOption(0);
         await Settle("crystal board");
         var game = CrystalDecisions.Active!;
-        await game.CellClicked(game.cells[5,5]);
+        await game.CellClicked(game.cells[5, 5]);
         await RoundTrip("crystal reveal undo/redo");
         while (CrystalDecisions.Active is { IsFinished: false } active)
         {

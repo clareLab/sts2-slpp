@@ -82,9 +82,11 @@ internal static class Recorder
         var manager = GameBridge.Manager;
         var room = new RoomRecord
         {
-            Save = GameBridge.SaveJson(save), Floor = GameBridge.State!.TotalFloor + 1,
+            Save = GameBridge.SaveJson(save),
+            Floor = GameBridge.State!.TotalFloor + 1,
             Label = $"Floor {GameBridge.State.TotalFloor + 1}",
-            ActionId = manager.ActionQueueSet.NextActionId, HookId = manager.ActionQueueSynchronizer.NextHookId,
+            ActionId = manager.ActionQueueSet.NextActionId,
+            HookId = manager.ActionQueueSynchronizer.NextHookId,
             ChoiceIds = manager.PlayerChoiceSynchronizer.ChoiceIds.ToList(),
             RewardIds = manager.RewardsSetSynchronizer.GetNextRewardIds().ToList()
         };

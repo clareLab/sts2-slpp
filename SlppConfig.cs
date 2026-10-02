@@ -40,8 +40,12 @@ public sealed class SlppConfig : SimpleModConfig
         .ToDictionary(s => s, s => typeof(SlppConfig).GetProperty(s + "Key")!);
     private static readonly Dictionary<string, string> Labels = new()
     {
-        [nameof(Actions)] = "Action controls", [nameof(Turns)] = "Turn controls", [nameof(RoomRestart)] = "Room restart",
-        [nameof(QuickRestart)] = "Quick restart", [nameof(Hotkeys)] = "Keyboard shortcuts", [nameof(Scale)] = "UI scale (%)",
+        [nameof(Actions)] = "Action controls",
+        [nameof(Turns)] = "Turn controls",
+        [nameof(RoomRestart)] = "Room restart",
+        [nameof(QuickRestart)] = "Quick restart",
+        [nameof(Hotkeys)] = "Keyboard shortcuts",
+        [nameof(Scale)] = "UI scale (%)",
         [nameof(AlignRight)] = "Align toolbar right"
     };
     private static Control? _options;
@@ -55,9 +59,14 @@ public sealed class SlppConfig : SimpleModConfig
 
     internal static string Name(Shortcut shortcut) => shortcut switch
     {
-        Shortcut.Undo => "Undo action", Shortcut.Redo => "Redo action", Shortcut.PreviousTurn => "Previous turn",
-        Shortcut.NextTurn => "Next turn", Shortcut.RestartRoom => "Restart room", Shortcut.RestartSeed => "Same seed",
-        Shortcut.RandomSeed => "Random seed", _ => "Timeline"
+        Shortcut.Undo => "Undo action",
+        Shortcut.Redo => "Redo action",
+        Shortcut.PreviousTurn => "Previous turn",
+        Shortcut.NextTurn => "Next turn",
+        Shortcut.RestartRoom => "Restart room",
+        Shortcut.RestartSeed => "Same seed",
+        Shortcut.RandomSeed => "Random seed",
+        _ => "Timeline"
     };
 
     internal static bool Enabled(Shortcut shortcut) => shortcut switch
