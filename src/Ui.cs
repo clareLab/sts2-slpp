@@ -35,11 +35,13 @@ internal static class Ui
         button.CustomMinimumSize = new Vector2(40, 40);
         button.MouseDefaultCursorShape = Control.CursorShape.PointingHand;
         button.TooltipText = label;
+        button.MouseEntered += () => { if (!button.Disabled) button.SelfModulate = new Color("fff2cd"); };
+        button.MouseExited += () => button.SelfModulate = Colors.White;
         if (!ResourceLoader.Exists(path)) { button.Text = label; return; }
         var icon = new TextureRect
         {
             Name = "Icon",
-            Texture = GD.Load<Texture2D>(path),
+            Texture = Texture(path),
             ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
             StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
             MouseFilter = Control.MouseFilterEnum.Ignore,
@@ -55,9 +57,33 @@ internal static class Ui
         Shortcut.NextTurn => "res://images/atlases/ui_atlas.sprites/settings_tiny_right_arrow.tres",
         Shortcut.RestartSeed => "res://images/atlases/ui_atlas.sprites/top_bar/top_bar_floor.tres",
         Shortcut.RandomSeed => "res://images/packed/statistics_screen/stats_questionmark.png",
-        Shortcut.Timeline => "res://images/packed/main_menu/submenu_history_icon.png",
+        Shortcut.Timeline => "res://images/atlases/ui_atlas.sprites/top_bar/timer_icon.tres",
         _ => BackIcon
     };
+
+    internal static string RoomIcon(string label) => "res://images/atlases/ui_atlas.sprites/map/icons/map_" + (label switch
+    {
+        "Combat" => "monster",
+        "Elite" => "elite",
+        "Boss" => "elite",
+        "Rest site" => "rest",
+        "Shop" => "shop",
+        "Treasure" => "chest",
+        _ => "unknown"
+    }) + ".tres";
+
+    private static Texture2D Texture(string path)
+    {
+        var texture = GD.Load<Texture2D>(path);
+        return texture is AtlasTexture atlas ? new AtlasTexture { Atlas = atlas.Atlas, Region = atlas.Region, FilterClip = true } : texture;
+    }
+
+    internal static void TreeIcon(TreeItem item, int column, string path)
+    {
+        if (!ResourceLoader.Exists(path)) return;
+        item.SetIcon(column, Texture(path));
+        item.SetIconMaxWidth(column, 22);
+    }
 
     internal static Button TextButton(string text, Action action, string name)
     {
@@ -68,7 +94,7 @@ internal static class Ui
 
     internal static (Button Button, Label Key) MenuRow(string text, string path, Action action, string name)
     {
-        var button = new Button { Name = name, Theme = Theme, Flat = true, CustomMinimumSize = new Vector2(0, 36), MouseDefaultCursorShape = Control.CursorShape.PointingHand };
+        var button = new Button { Name = name, Theme = Theme, ThemeTypeVariation = "SlppMenuRow", CustomMinimumSize = new Vector2(0, 36), MouseDefaultCursorShape = Control.CursorShape.PointingHand };
         var content = new MarginContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
         content.AddThemeConstantOverride("margin_left", 8);
         content.AddThemeConstantOverride("margin_right", 8);
@@ -81,7 +107,7 @@ internal static class Ui
         content.AddChild(row);
         var icon = new TextureRect
         {
-            Texture = ResourceLoader.Exists(path) ? GD.Load<Texture2D>(path) : GD.Load<Texture2D>(MenuIcon),
+            Texture = Texture(ResourceLoader.Exists(path) ? path : MenuIcon),
             CustomMinimumSize = new Vector2(24, 24),
             SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
             ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
@@ -147,9 +173,12 @@ internal static class Ui
             theme.SetStylebox("normal", type, Surface("2e4351", "526c75", 6));
             theme.SetStylebox("hover", type, Surface("526575", "f2d68d", 6));
             theme.SetStylebox("pressed", type, Surface("15232d", "d1ac60", 6));
-            theme.SetStylebox("hover_pressed", type, Surface("203440", "f2d68d", 6));
+            theme.SetStylebox("hover_pressed", type, Surface("526575", "fff2cd", 6));
             theme.SetStylebox("disabled", type, Surface("23323a", "3c4c53", 6));
         }
+        theme.SetTypeVariation("SlppMenuRow", "Button");
+        theme.SetStylebox("normal", "SlppMenuRow", new StyleBoxEmpty());
+        theme.SetStylebox("disabled", "SlppMenuRow", new StyleBoxEmpty());
         foreach (string type in new[] { "Label", "Button", "Tree", "TooltipLabel" })
         {
             theme.SetColor("font_color", type, new Color("eee5cf"));

@@ -26,6 +26,7 @@ public sealed class SlppConfig : SimpleModConfig
     public static bool AlignRight { get; set; }
     [ConfigHideInUI] public static float ToolbarX { get; set; } = -1;
     [ConfigHideInUI] public static float ToolbarY { get; set; } = -1;
+    [ConfigHideInUI] public static float HistoryHeight { get; set; } = 420;
 
     [ConfigSection("Shortcuts")]
     [ConfigTextInput(KeyPattern, MaxLength = 64)] public static string UndoKey { get; set; } = "Ctrl+Z";

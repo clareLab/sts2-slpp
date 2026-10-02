@@ -63,9 +63,9 @@ if [[ "$mode" == ui ]]; then
   export DISPLAY
 fi
 for suite in "${suites[@]}"; do
-    case "$suite" in full|resume|settings|settings-resume|ui|world|characters|crystal|potions|choices|transitions|archive|layout) ;; *) echo "Unknown test suite: $suite" >&2; exit 2 ;; esac
+    case "$suite" in full|resume|settings|settings-resume|ui|world|characters|crystal|potions|choices|transitions|archive|layout|preview) ;; *) echo "Unknown test suite: $suite" >&2; exit 2 ;; esac
   args=(--audio-driver Dummy --force-steam=off --slpp-selftest --slpp-suite="$suite")
-  if [[ "$suite" == ui || "$suite" == layout ]]; then
+  if [[ "$suite" == ui || "$suite" == layout || "$suite" == preview ]]; then
     [[ "$mode" == ui ]] || { echo 'Use ./scripts/test.sh --ui for rendered tests.' >&2; exit 2; }
     args+=(--display-driver x11 --rendering-method gl_compatibility --rendering-driver opengl3 --windowed --resolution 1280x720)
   else args+=(--headless); fi
@@ -73,7 +73,7 @@ for suite in "${suites[@]}"; do
   result=0
   report="$sandbox_dir/userdata/SlayTheSpire2/slpp-selftest.json"
   rm -f "$report" "artifacts/validation/$suite.json"
-  XDG_DATA_HOME="$sandbox_dir/userdata" timeout --kill-after=10 "${SLPP_TEST_TIMEOUT:-300}" "${runner[@]}" "$sandbox_dir/game/SlayTheSpire2" "${args[@]}" > "artifacts/validation/$suite.log" 2>&1 || result=$?
+  LP_NUM_THREADS="${LP_NUM_THREADS:-4}" XDG_DATA_HOME="$sandbox_dir/userdata" timeout --kill-after=10 "${SLPP_TEST_TIMEOUT:-300}" "${runner[@]}" "$sandbox_dir/game/SlayTheSpire2" "${args[@]}" > "artifacts/validation/$suite.log" 2>&1 || result=$?
   [[ "$result" == 0 ]] || { echo "Test failed. See artifacts/validation/$suite.log" >&2; exit "$result"; }
   [[ -f "$report" ]] || { echo "Missing test report. See artifacts/validation/$suite.log" >&2; exit 1; }
   cp "$report" "artifacts/validation/$suite.json"
@@ -83,11 +83,17 @@ r=json.load(open(sys.argv[1]))
 assert r['success'], r['error']
 print(f"PASS {len(r['passed'])} checks, game {r['gameBuild']}")
 PY
-  if [[ "$suite" == ui || "$suite" == layout ]]; then
+  if [[ "$suite" == ui || "$suite" == layout || "$suite" == preview ]]; then
     if [[ "$suite" == ui ]]; then
       cp "$sandbox_dir/userdata/SlayTheSpire2/slpp-settings.png" artifacts/validation/settings.png
       cp "$sandbox_dir/userdata/SlayTheSpire2/slpp-shortcuts.png" artifacts/validation/shortcuts.png
     fi
+    if [[ "$suite" == layout || "$suite" == preview ]]; then
+      for kind in card potion; do
+        cp "$sandbox_dir/userdata/SlayTheSpire2/slpp-preview-$kind.png" "artifacts/validation/preview-$kind.png"
+      done
+    fi
+    [[ "$suite" == preview ]] && continue
     cp "$sandbox_dir/userdata/SlayTheSpire2/slpp-ui.png" artifacts/validation/interface.png
     cp "$sandbox_dir/userdata/SlayTheSpire2/slpp-toolbar.png" artifacts/validation/toolbar.png
     cp "$sandbox_dir/userdata/SlayTheSpire2/slpp-help.png" artifacts/validation/shortcuts-help.png

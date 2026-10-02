@@ -40,6 +40,9 @@ internal static class Recorder
     private static bool _resumePending;
     private static bool _atHistoricalPosition;
     private static string? _profileDirectory;
+    internal static string OperationStage { get; set; } = "";
+    internal static int OperationStep { get; private set; }
+    internal static int OperationTotal { get; private set; }
     internal static bool HasExternalTask => _externalDepth > 0;
     internal static RoomRecord? Room => History?.Current;
     internal static string ProfileDirectory => ProjectSettings.GlobalizePath(SaveManager.Instance.GetProfileScopedPath($"slpp/{GameBridge.Build}-{ModelIdSerializationCache.Hash:X8}"));
@@ -111,7 +114,7 @@ internal static class Recorder
         _atHistoricalPosition = false;
         var evt = new CombatReplayEvent { eventType = CombatReplayEventType.GameAction, playerId = action.OwnerId, action = action.ToNetAction() };
         string label = TimelineText.Action(evt);
-        Room.Commands.Add(new RecordedCommand("action", GameBridge.Pack(evt), Label: label));
+        Room.Commands.Add(HistoryPreview.Capture(new RecordedCommand("action", GameBridge.Pack(evt), Label: label), evt));
         _needPoint = true;
         _stableFrames = 0;
     }
@@ -224,6 +227,8 @@ internal static class Recorder
         var target = room.Points[pointIndex];
         var recoveryRoom = Room ?? room;
         int recoveryIndex = History.RoomCursor;
+        OperationStage = "Waiting for the current action";
+        OperationStep = OperationTotal = 0;
         Busy = true;
         try
         {
@@ -237,7 +242,7 @@ internal static class Recorder
         _generation++;
         _externalDepth = 0;
         LastError = null;
-        Status = "Restoring...";
+        Status = "Restoring";
         _replayRoom = room;
         _target = target;
         _replayChoice = 0;
@@ -252,6 +257,7 @@ internal static class Recorder
             SaveManager.Instance.Progress = ProgressState.FromSerializable(JsonSerializer.Deserialize(progressJson, JsonSerializationUtility.GetTypeInfo<SerializableProgress>())!, new DeserializationContext());
             SaveManager.Instance.PrefsSave.FastMode = FastModeType.Instant;
             await Replay(room, target);
+            OperationStage = "Verifying state";
             string actual = GameBridge.Fingerprint(target.FingerprintVersion);
             if (actual != target.Hash && target.FingerprintVersion == 1 && !GameBridge.InCombatRoom && target.Turn > 0)
                 actual = await CheckLegacyBoundary(roomIndex, room, target, actual);
@@ -278,8 +284,10 @@ internal static class Recorder
                 _externalDepth = 0;
                 _target = null;
                 _replayRoom = null;
+                OperationStage = "Recovering room";
+                OperationStep = OperationTotal = 0;
                 await GameBridge.Load(recoveryRoom);
-                await GameBridge.Until(() => GameBridge.Stable, "Room recovery timed out");
+                await GameBridge.Until(() => GameBridge.Stable || GameBridge.ChoiceOpen, "Room recovery timed out");
                 History.RoomCursor = recoveryIndex;
                 History.PointCursor = 0;
                 _atHistoricalPosition = true;
@@ -334,11 +342,15 @@ internal static class Recorder
         _target = target;
         WaitingForChoice = false;
         LastError = null;
+        OperationTotal = target.Commands;
+        OperationStep = 0;
         await GameBridge.Load(room);
+        OperationStage = "Restoring room start";
         await WaitBoundary(target.Commands == 0);
         for (int i = 0; i < target.Commands; i++)
         {
             var command = room.Commands[i];
+            OperationStage = $"Replaying {i + 1} / {target.Commands}: {command.Label}";
             if (command.Kind == "action")
             {
                 var evt = GameBridge.Unpack<CombatReplayEvent>(command.Data);
@@ -346,6 +358,7 @@ internal static class Recorder
             }
             else ExternalDecisions.Execute(command);
             await WaitBoundary(i == target.Commands - 1);
+            OperationStep = i + 1;
         }
         if (_replayChoice != target.Choices) throw new InvalidOperationException("Recorded choices were not fully consumed");
     }
@@ -369,10 +382,10 @@ internal static class Recorder
         await GameBridge.Until(() =>
         {
             if (LastError != null) throw new InvalidOperationException(LastError);
-            bool ready = (GameBridge.Stable && (_externalDepth == 0 || ExternalDecisions.WaitingForDecision)) || (final && _target?.AwaitingChoice == true && WaitingForChoice);
+            bool ready = (GameBridge.Stable && (_externalDepth == 0 || ExternalDecisions.WaitingForDecision)) || (final && _target?.AwaitingChoice == true && WaitingForChoice && GameBridge.ChoiceOpen);
             frames = ready ? frames + 1 : 0;
             return frames >= 5;
-        }, "Timed out waiting for an action or choice boundary");
+        }, $"Timed out during {OperationStage}");
     }
 
     internal static Task Step(int direction)
@@ -447,6 +460,8 @@ internal static class Recorder
         var seedState = RunState.FromSerializable(save);
         Flush();
         await _writeTask;
+        OperationStage = "Restarting run";
+        OperationStep = OperationTotal = 0;
         Busy = true;
         try
         {
@@ -456,8 +471,7 @@ internal static class Recorder
             Restoring = true;
             _generation++;
             _externalDepth = 0;
-            GameBridge.DetachPendingChoices();
-            if (GameBridge.State != null) GameBridge.Manager.CleanUp();
+            GameBridge.CleanUp();
             MegaCrit.Sts2.Core.Nodes.NGame.Instance!.RootSceneContainer.SetCurrentScene(new Control());
             ExternalDecisions.Reset();
             History = null;

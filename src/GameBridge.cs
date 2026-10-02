@@ -127,9 +127,9 @@ internal static class GameBridge
     internal static async Task Load(RoomRecord record)
     {
         if (SaveManager.Instance.CurrentRunSaveTask is { } saveTask) await saveTask;
+        Recorder.OperationStage = "Loading room";
         var save = ReadSave(record.Save);
-        DetachPendingChoices();
-        if (State != null) Manager.CleanUp();
+        CleanUp();
         ExternalDecisions.Reset();
         var state = RunState.FromSerializable(save);
         await Manager.SetUpSavedSingleplayer(state, save);
@@ -145,22 +145,25 @@ internal static class GameBridge
         await Manager.LoadIntoLatestMapCoord(AbstractRoom.FromSerializable(save.PreFinishedRoom, state));
     }
 
-    internal static void DetachPendingChoices()
+    internal static void CleanUp()
     {
+        var cancellations = new List<Action>();
         foreach (var node in Descendants(((SceneTree)Engine.GetMainLoop()).Root))
         {
             if (node is NPlayerHand)
-                Detach<IEnumerable<CardModel>>(node, "_selectionCompletionSource", []);
+                Detach<IEnumerable<CardModel>>(node, "_selectionCompletionSource", [], cancellations);
             else if (node is NCardRewardSelectionScreen)
-                Detach<int?>(node, "_completionSource", null);
+                Detach<int?>(node, "_completionSource", null, cancellations);
             else if (node is NCardGridSelectionScreen or NChooseACardSelectionScreen)
-                Detach<IEnumerable<CardModel>>(node, "_completionSource", []);
+                Detach<IEnumerable<CardModel>>(node, "_completionSource", [], cancellations);
             else if (node is NChooseARelicSelection)
-                Detach<IEnumerable<RelicModel>>(node, "_completionSource", []);
+                Detach<IEnumerable<RelicModel>>(node, "_completionSource", [], cancellations);
         }
+        try { if (State != null) Manager.CleanUp(); }
+        finally { foreach (var cancel in cancellations) cancel(); }
     }
 
-    private static void Detach<T>(object node, string fieldName, T empty)
+    private static void Detach<T>(object node, string fieldName, T empty, List<Action> cancellations)
     {
         var field = AccessTools.Field(node.GetType(), fieldName) ?? throw new MissingFieldException(node.GetType().Name, fieldName);
         if (field.GetValue(node) is TaskCompletionSource<T> source && !source.Task.IsCompleted)
@@ -168,6 +171,7 @@ internal static class GameBridge
             var replacement = new TaskCompletionSource<T>();
             replacement.SetResult(empty);
             field.SetValue(node, replacement);
+            cancellations.Add(() => source.TrySetCanceled());
         }
     }
 

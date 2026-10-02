@@ -40,6 +40,7 @@ internal static class SelfTests
             if (OS.GetCmdlineArgs().Contains("--slpp-suite=resume")) { await TestResume(); return; }
             if (OS.GetCmdlineArgs().Contains("--slpp-suite=ui")) { await TestUi(); return; }
             if (OS.GetCmdlineArgs().Contains("--slpp-suite=layout")) { await TestLayout(); return; }
+            if (OS.GetCmdlineArgs().Contains("--slpp-suite=preview")) { await TestLayout(true); return; }
             if (OS.GetCmdlineArgs().Contains("--slpp-suite=settings")) { await TestSettings(); return; }
             if (OS.GetCmdlineArgs().Contains("--slpp-suite=settings-resume")) { TestSettingsResume(); return; }
             SaveManager.Instance.Progress.GetOrCreateCharacterStats(ModelDb.Character<Ironclad>().Id).TotalLosses = 2;
@@ -143,7 +144,42 @@ internal static class SelfTests
         await Recorder.Restart(true);
         await GameBridge.Until(() => GameBridge.Stable, "restart from selection");
         Check(GameBridge.State!.Rng.StringSeed != seed && !Recorder.Faulted && !GameBridge.ChoiceOpen, "random restart while a card choice is pending");
+        await TestOpeningChoice();
         GD.Print("[slpp] SELFTEST_CHOICES_OK");
+    }
+
+    private static async Task TestOpeningChoice()
+    {
+        await GameBridge.Until(() => GameBridge.Stable, "opening choice fixture");
+        await MegaCrit.Sts2.Core.Commands.RelicCmd.Obtain<MegaCrit.Sts2.Core.Models.Relics.GamblingChip>(LocalContext.GetMe(GameBridge.State)!);
+        var room = GameBridge.State!.Map!.GetAllMapPoints().Where(p => p.PointType == MapPointType.Monster).OrderBy(p => p.coord.row).First();
+        await GameBridge.Manager.EnterMapCoord(room.coord);
+        await GameBridge.Until(() => GameBridge.ChoiceOpen, "opening hand choice");
+        CompleteHandChoice();
+        await Settle("opening choice finished");
+        int index = Recorder.History!.RoomCursor, end = Recorder.History.PointCursor;
+        string expected = GameBridge.Fingerprint();
+        int choice = Recorder.Room!.Points.FindIndex(p => p.AwaitingChoice);
+        await Recorder.Restore(index, choice);
+        Check(GameBridge.ChoiceOpen, "opening choice restores before the play phase");
+        var pending = (TaskCompletionSource<IEnumerable<CardModel>>)AccessTools.Field(typeof(NPlayerHand), "_selectionCompletionSource").GetValue(NPlayerHand.Instance)!;
+        await Recorder.Restore(index, end);
+        Check(pending.Task.IsCompleted, "leaving an opening choice releases its original waiter");
+        Check(GameBridge.Fingerprint() == expected, "opening choice replays to the same hand");
+        await Recorder.Restore(index, choice);
+        CompleteHandChoice(true);
+        await Settle("alternate opening choice");
+        Check(!Recorder.Faulted && !Recorder.Busy && GameBridge.Fingerprint() != expected, "opening choice supports a live alternative after restore");
+        var original = Recorder.Room!.Points[choice];
+        Recorder.Room.Points[choice] = original with { Hash = new string('0', 64) };
+        try { await Recorder.Restore(index, choice); }
+        catch (InvalidOperationException) { }
+        Check(Recorder.Faulted && !Recorder.Busy && !Recorder.Restoring && GameBridge.ChoiceOpen, "failed opening restore recovers to an interactive choice without waiting for play phase");
+        Recorder.Room.Points[choice] = original;
+        await Recorder.Restore(index, choice);
+        CompleteHandChoice();
+        await Settle("recovered opening choice");
+        Check(!Recorder.Faulted && GameBridge.Stable, "recovered opening choice can continue the combat");
     }
 
     private static void CompleteHandChoice(bool last = false)
@@ -573,13 +609,49 @@ internal static class SelfTests
         await TestToolbarLayout(root, hash);
     }
 
-    private static async Task TestLayout()
+    private static async Task TestLayout(bool previewOnly = false)
     {
         ResetSettings();
         if (GameBridge.State != null) GameBridge.Manager.CleanUp();
         await NGame.Instance!.StartNewSingleplayerRun(ModelDb.Character<Ironclad>(), true, ActModel.GetDefaultList(), [], "SLPP-UI", GameMode.Standard);
+        await MegaCrit.Sts2.Core.Commands.PotionCmd.TryToProcure<MegaCrit.Sts2.Core.Models.Potions.StrengthPotion>(LocalContext.GetMe(GameBridge.State)!);
         await Enter(MapPointType.Monster);
-        await TestToolbarLayout(((SceneTree)Engine.GetMainLoop()).Root, GameBridge.Fingerprint());
+        var player = LocalContext.GetMe(GameBridge.State)!;
+        GameBridge.Manager.ActionQueueSynchronizer.RequestEnqueue(new UsePotionAction(player.Potions.First(), null, true));
+        await Settle("history potion preview fixture");
+        var card = player.PlayerCombatState!.Hand.Cards.First(c => c.CanPlay() && c.Id.Entry.StartsWith("DEFEND", StringComparison.Ordinal));
+        GameBridge.Manager.ActionQueueSynchronizer.RequestEnqueue(new PlayCardAction(card, null));
+        await Settle("history card preview fixture");
+        var root = ((SceneTree)Engine.GetMainLoop()).Root;
+        if (!previewOnly) await TestToolbarLayout(root, GameBridge.Fingerprint());
+        Press("SlppTimeline");
+        for (int i = 0; i < 5; i++) await GameBridge.Frame();
+        var points = Widget<Tree>("SlppPoints");
+        foreach (string kind in new[] { "Potion", "Card" })
+        {
+            int index = Recorder.Room!.Points.FindLastIndex(p => p.Commands > 0 && (kind == "Card" ? Recorder.Room.Commands[p.Commands - 1].Card != null : Recorder.Room.Commands[p.Commands - 1].Potion != null));
+            var item = points.GetRoot().GetChildren().Single(i => i.GetMetadata(0).AsInt32() == index);
+            points.ScrollToItem(item);
+            var position = points.GetGlobalTransform() * points.GetItemAreaRect(item, 2).GetCenter();
+            root.WarpMouse(position);
+            root.PushInput(new InputEventMouseMotion { Position = position, GlobalPosition = position }, true);
+            for (int i = 0; i < 30; i++) await GameBridge.Frame();
+            Check(GameBridge.Descendants(root).Any(n => n.Name == "SlppHistoryPreview"), "history shows native " + kind.ToLowerInvariant() + " hover preview");
+            await root.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+            root.GetTexture().GetImage().SavePng(ProjectSettings.GlobalizePath("user://slpp-preview-" + kind.ToLowerInvariant() + ".png"));
+        }
+        Press("SlppTimeline");
+        await GameBridge.Frame();
+        Check(!GameBridge.Descendants(root).Any(n => n.Name == "SlppHistoryPreview"), "collapsing history removes its native preview");
+        string expected = GameBridge.Fingerprint();
+        var restore = Recorder.Restore(Recorder.History!.RoomCursor, Recorder.History.PointCursor);
+        await GameBridge.Until(() => restore.IsCompleted || GameBridge.Singleplayer, "restore status visible");
+        Hud.Tick();
+        Check(Recorder.Busy && Widget<Control>("SlppSpinner").Visible && !Widget<Label>("SlppStatus").Visible, "restore uses an animated indicator without status text");
+        await root.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+        root.GetTexture().GetImage().SavePng(ProjectSettings.GlobalizePath("user://slpp-restoring.png"));
+        await restore;
+        Check(Recorder.OperationTotal == 2 && Recorder.OperationStep == 2 && GameBridge.Fingerprint() == expected, "restore progress counts completed replay actions");
     }
 
     private static async Task TestToolbarLayout(Window root, string hash)
@@ -665,10 +737,20 @@ internal static class SelfTests
         root.GetTexture().GetImage().SavePng(ProjectSettings.GlobalizePath("user://slpp-hover.png"));
         var menuButton = Widget<Button>("SlppMenuButton");
         var menuPosition = menuButton.GetGlobalRect().GetCenter();
+        root.WarpMouse(menuPosition);
+        root.PushInput(new InputEventMouseMotion { Position = menuPosition, GlobalPosition = menuPosition }, true);
+        for (int i = 0; i < 3; i++) await GameBridge.Frame();
+        Check(menuButton.IsHovered() && menuButton.GetDrawMode() == BaseButton.DrawMode.Hover, "menu button receives real pointer hover");
         root.PushInput(new InputEventMouseButton { Position = menuPosition, GlobalPosition = menuPosition, ButtonIndex = MouseButton.Left, Pressed = true, ButtonMask = MouseButtonMask.Left }, true);
         root.PushInput(new InputEventMouseButton { Position = menuPosition, GlobalPosition = menuPosition, ButtonIndex = MouseButton.Left, Pressed = false }, true);
         for (int i = 0; i < 3; i++) await GameBridge.Frame();
         Check(Widget<PanelContainer>("SlppMenu").Visible, "menu icon opens with a mouse click");
+        var menuItem = Widget<Button>("SlppRestartRoom");
+        var hover = menuItem.GetGlobalRect().GetCenter();
+        root.WarpMouse(hover);
+        root.PushInput(new InputEventMouseMotion { Position = hover, GlobalPosition = hover }, true);
+        for (int i = 0; i < 3; i++) await GameBridge.Frame();
+        Check(menuItem.IsHovered() && menuItem.GetDrawMode() == BaseButton.DrawMode.Hover, "menu rows receive hover through their icons and labels");
         await root.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
         root.GetTexture().GetImage().SavePng(ProjectSettings.GlobalizePath("user://slpp-menu.png"));
         Press("SlppMenuButton");
@@ -680,10 +762,45 @@ internal static class SelfTests
         var history = Widget<PanelContainer>("SlppHistory");
         var toolbarRect = toolbar.GetGlobalRect();
         Check(history.Visible && history.Position.X == toolbar.Position.X && history.Position.Y >= toolbarRect.End.Y && history.Position.Y - toolbarRect.End.Y <= 9, "history extends directly below the toolbar");
+
+        int cursor = Recorder.History!.PointCursor;
+        Widget<Tree>("SlppPoints").EmitSignal(Tree.SignalName.ItemActivated);
+        Widget<Tree>("SlppRooms").EmitSignal(Tree.SignalName.ItemActivated);
+        Check(!Recorder.Busy && history.Visible && Recorder.History.PointCursor == cursor && GameBridge.Fingerprint() == hash, "double-click activation never loads a history entry");
+        var grip = Widget<Control>("SlppHistoryResize");
+        float initialHeight = history.Size.Y;
+        start = grip.GetGlobalRect().GetCenter();
+        moved = start + new Vector2(0, 160);
+        root.PushInput(new InputEventMouseButton { Position = start, GlobalPosition = start, ButtonIndex = MouseButton.Left, Pressed = true, ButtonMask = MouseButtonMask.Left }, true);
+        root.PushInput(new InputEventMouseMotion { Position = moved, GlobalPosition = moved, ButtonMask = MouseButtonMask.Left }, true);
+        root.PushInput(new InputEventMouseButton { Position = moved, GlobalPosition = moved, ButtonIndex = MouseButton.Left, Pressed = false }, true);
+        for (int i = 0; i < 3; i++) await GameBridge.Frame();
+        Check(Math.Abs(history.Size.Y - initialHeight - 160) < 2, "history height follows the resize handle");
+        float savedHeight = SlppConfig.HistoryHeight;
+        SlppConfig.HistoryHeight = 420;
+        SlppConfig.Instance.Load();
+        Check(Math.Abs(SlppConfig.HistoryHeight - savedHeight) < 1, "history height persists through config reload");
+        start = grip.GetGlobalRect().GetCenter();
+        moved = start - new Vector2(0, 800);
+        root.PushInput(new InputEventMouseButton { Position = start, GlobalPosition = start, ButtonIndex = MouseButton.Left, Pressed = true, ButtonMask = MouseButtonMask.Left }, true);
+        root.PushInput(new InputEventMouseMotion { Position = moved, GlobalPosition = moved, ButtonMask = MouseButtonMask.Left }, true);
+        root.PushInput(new InputEventMouseButton { Position = moved, GlobalPosition = moved, ButtonIndex = MouseButton.Left, Pressed = false }, true);
+        Check(SlppConfig.HistoryHeight == Hud.MinimumHistoryHeight, "history resize respects its minimum height");
+        SlppConfig.HistoryHeight = 420;
+        Hud.Tick();
         await SendKey(Key.F8);
         Check(!Hud.ModalOpen && !history.Visible, "history hotkey collapses its open panel");
         await SendKey(Key.F8);
         Check(history.Visible, "history hotkey reopens its panel");
+        Check(Widget<Button>("SlppTimeline").ButtonPressed && !menuButton.ButtonPressed, "dedicated history toggle reflects the open panel");
+        await NGame.Instance!.Transition.FadeOut(0);
+        Hud.Tick();
+        Check(!Widget<CanvasLayer>("slpp").Visible && !Hud.ModalOpen, "transition hides toolbar and collapses its panels");
+        await NGame.Instance.Transition.FadeIn(0);
+        Hud.Tick();
+        Check(Widget<CanvasLayer>("slpp").Visible, "toolbar returns after the transition");
+        Press("SlppTimeline");
+        for (int i = 0; i < 3; i++) await GameBridge.Frame();
         SlppConfig.ToolbarX = SlppConfig.ToolbarY = 1;
         SlppConfig.Scale = 140;
         Hud.Tick();
@@ -706,7 +823,7 @@ internal static class SelfTests
         if (GameBridge.State != null) GameBridge.Manager.CleanUp();
         Check(ExternalDecisions.RewardStack.Count == 0 && CrystalDecisions.Active == null, "run cleanup clears event and reward state");
         await NGame.Instance!.StartNewSingleplayerRun(ModelDb.Character<Ironclad>(), true, ActModel.GetDefaultList(), [], "SLPP-POTION", GameMode.Standard);
-        await Settle("potion fixture start");
+        await GameBridge.Until(() => GameBridge.Stable, "potion fixture start");
         await MegaCrit.Sts2.Core.Commands.PotionCmd.TryToProcure<MegaCrit.Sts2.Core.Models.Potions.StrengthPotion>(LocalContext.GetMe(GameBridge.State)!);
         await Enter(MapPointType.Monster);
         var player = LocalContext.GetMe(GameBridge.State)!;

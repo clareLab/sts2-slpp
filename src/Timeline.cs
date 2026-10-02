@@ -40,7 +40,7 @@ public sealed class RoomRecord
     public List<TimelinePoint> Points { get; set; } = [];
 }
 
-public sealed record RecordedCommand(string Kind, byte[] Data, int Index = 0, string Label = "");
+public sealed record RecordedCommand(string Kind, byte[] Data, int Index = 0, string Label = "", string? Card = null, string? Potion = null);
 public sealed record RecordedChoice(uint Id, byte[] Data);
 public sealed record TimelinePoint(int Commands, int Choices, int Turn, bool AwaitingChoice, string Hash, string Label, int FingerprintVersion = 1);
 
