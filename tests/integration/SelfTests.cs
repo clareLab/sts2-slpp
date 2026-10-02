@@ -809,6 +809,8 @@ internal static class SelfTests
         Hud.Tick();
         var shortcuts = Widget<PanelContainer>("SlppShortcutList");
         Check(shortcuts.Visible && Widget<Label>("SlppBindingUndo").Text == "Ctrl+Z", "menu opens current shortcut list");
+        Check(Math.Abs(shortcuts.GetGlobalRect().Size.X - Widget<PanelContainer>("SlppToolbar").GetGlobalRect().Size.X) < 1,
+            "shortcuts match the toolbar width");
         SlppConfig.UndoKey = "Alt+U";
         Hud.Tick();
         Check(Widget<Label>("SlppBindingUndo").Text == "Alt+U", "shortcut list follows rebinding");
@@ -847,6 +849,7 @@ internal static class SelfTests
         Press("SlppOpenLog");
         for (int i = 0; i < 5; i++) await GameBridge.Frame();
         var log = Widget<PanelContainer>("SlppLog");
+        Check(Math.Abs(log.GetGlobalRect().Size.X - toolbar.GetGlobalRect().Size.X) < 1, "the log matches the toolbar width");
         Check(log.Visible && !Widget<Control>("SlppLogNotice").Visible && GameBridge.Descendants(log).OfType<Label>().Any(l => l.Text.Contains("Recording paused")),
             "the log opens from the menu and acknowledges its visible messages");
         await root.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
@@ -936,6 +939,15 @@ internal static class SelfTests
             var menuRect = Widget<PanelContainer>("SlppMenu").GetGlobalRect();
             Check(Math.Abs(menuRect.Size.X - toolbar.GetGlobalRect().Size.X) < 1 && menuRect.Position.X == toolbar.Position.X,
                 $"the menu stays aligned with a reduced toolbar at {scale}% scale");
+            foreach (var (button, panel, back) in new[] { ("SlppShortcuts", shortcuts, "SlppShortcutsBack"), ("SlppOpenLog", log, "SlppLogBack") })
+            {
+                Press(button);
+                for (int i = 0; i < 5; i++) await GameBridge.Frame();
+                Check(Math.Abs(panel.GetGlobalRect().Size.X - toolbar.GetGlobalRect().Size.X) < 1 && panel.Position.X == toolbar.Position.X,
+                    $"{panel.Name} stays aligned with a reduced toolbar at {scale}% scale");
+                Press(back);
+                for (int i = 0; i < 3; i++) await GameBridge.Frame();
+            }
         }
         SlppConfig.Actions = SlppConfig.QuickRestart = true;
         SlppConfig.Scale = 100;

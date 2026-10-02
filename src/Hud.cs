@@ -147,7 +147,7 @@ internal static class Hud
         };
         _resizeHandle.GuiInput += ResizeInput;
         history.AddChild(_resizeHandle);
-        _shortcuts = Sheet("SlppShortcutList", 344, out var shortcuts);
+        _shortcuts = Sheet("SlppShortcutList", 0, out var shortcuts);
         Header(shortcuts, "Shortcuts");
         var keys = new GridContainer { Columns = 2 };
         keys.AddThemeConstantOverride("h_separation", 20);
@@ -155,17 +155,17 @@ internal static class Hud
         shortcuts.AddChild(keys);
         foreach (var shortcut in Enum.GetValues<Shortcut>())
         {
-            var label = Ui.WrappedText(SlppConfig.Name(shortcut), 20, 148);
+            var label = Ui.WrappedText(SlppConfig.Name(shortcut), 20, 1);
             label.Name = "SlppShortcutName" + shortcut;
             keys.AddChild(label);
-            var key = Ui.WrappedText("", 18, 148);
+            var key = Ui.WrappedText("", 18, 1);
             key.Name = "SlppBinding" + shortcut;
             key.HorizontalAlignment = HorizontalAlignment.Right;
             key.VerticalAlignment = VerticalAlignment.Center;
             keys.AddChild(key);
             Bindings.Add(shortcut, key);
         }
-        _log = Sheet("SlppLog", 480, out var log);
+        _log = Sheet("SlppLog", 0, out var log);
         Header(log, "Log");
         var scroll = new ScrollContainer
         {
@@ -279,7 +279,7 @@ internal static class Hud
         if (!FlyoutOpen) return;
         Vector2 viewport = _panel.GetViewportRect().Size;
         var minimum = _flyout!.GetCombinedMinimumSize();
-        _flyout.Size = new Vector2(_flyout == _menu ? _panel.Size.X : minimum.X, minimum.Y);
+        _flyout.Size = new Vector2(_flyout == _history ? minimum.X : _panel.Size.X, minimum.Y);
         if (_flyout == _history)
         {
             float requested = float.IsFinite(SlppConfig.HistoryHeight) ? SlppConfig.HistoryHeight : 420;
