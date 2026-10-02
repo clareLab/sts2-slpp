@@ -608,6 +608,33 @@ internal static class SelfTests
         GD.Print($"[slpp] DRAG origin={origin} actual={toolbar.Position} handle={start} pointer={toolbar.GetGlobalMousePosition()}");
         Check(toolbar.Position.DistanceTo(origin + new Vector2(180, 120)) < 3, "drag handle moves toolbar without executing actions");
         Check(GameBridge.Fingerprint() == hash && SlppConfig.ToolbarX > 0 && SlppConfig.ToolbarY > 0, "dragging preserves game state and persists position");
+        var release = moved + new Vector2(135, 85);
+        start = handle.GetGlobalRect().GetCenter();
+        root.PushInput(new InputEventMouseButton { Position = start, GlobalPosition = start, ButtonIndex = MouseButton.Left, Pressed = true, ButtonMask = MouseButtonMask.Left }, true);
+        root.PushInput(new InputEventMouseMotion { Position = release, GlobalPosition = release, ButtonMask = MouseButtonMask.Left }, true);
+        root.PushInput(new InputEventMouseButton { Position = release, GlobalPosition = release, ButtonIndex = MouseButton.Left, Pressed = false }, true);
+        Check(toolbar.Position.DistanceTo(origin + release - start + new Vector2(180, 120)) < 1, "fast drag keeps the final pointer position before the next frame");
+        foreach (int scale in new[] { 80, 140 })
+        {
+            SlppConfig.Scale = scale;
+            Hud.Tick();
+            await GameBridge.Frame();
+            start = handle.GetGlobalRect().Position + new Vector2(9, 7) * toolbar.Scale;
+            var before = toolbar.Position;
+            var offset = start - before;
+            root.PushInput(new InputEventMouseButton { Position = start, GlobalPosition = start, ButtonIndex = MouseButton.Left, Pressed = true, ButtonMask = MouseButtonMask.Left }, true);
+            foreach (var delta in new[] { new Vector2(220, 130), new Vector2(-80, 35), new Vector2(45, -40) })
+            {
+                var pointer = start + delta;
+                root.PushInput(new InputEventMouseMotion { Position = pointer, GlobalPosition = pointer, ButtonMask = MouseButtonMask.Left }, true);
+                Check(toolbar.Position.DistanceTo(before + delta) < 1 && (pointer - toolbar.Position).DistanceTo(offset) < 1, $"drag preserves the grabbed point at {scale}% scale for {delta}");
+            }
+            release = start + new Vector2(70, 50);
+            root.PushInput(new InputEventMouseButton { Position = release, GlobalPosition = release, ButtonIndex = MouseButton.Left, Pressed = false }, true);
+            Check(toolbar.Position.DistanceTo(before + new Vector2(70, 50)) < 1, $"release applies the final position at {scale}% scale");
+        }
+        SlppConfig.Scale = 100;
+        Hud.Tick();
         var savedPosition = toolbar.Position;
         SlppConfig.ToolbarX = SlppConfig.ToolbarY = -1;
         SlppConfig.Instance.Load();
@@ -621,6 +648,19 @@ internal static class SelfTests
         Check(toolbar.Position.DistanceTo(origin) < 3 && SlppConfig.ToolbarX == -1, "reset returns toolbar to its default position");
         await root.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
         Check(root.GetTexture().GetImage().SavePng(ProjectSettings.GlobalizePath("user://slpp-toolbar.png")) == Error.Ok, "compact toolbar screenshot");
+        root.WarpMouse(Widget<Button>("SlppUndo").GetGlobalRect().GetCenter());
+        for (int i = 0; i < 3; i++) await GameBridge.Frame();
+        await root.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+        root.GetTexture().GetImage().SavePng(ProjectSettings.GlobalizePath("user://slpp-hover.png"));
+        var menuButton = Widget<MenuButton>("SlppMenuButton");
+        var menuPosition = menuButton.GetGlobalRect().GetCenter();
+        root.PushInput(new InputEventMouseButton { Position = menuPosition, GlobalPosition = menuPosition, ButtonIndex = MouseButton.Left, Pressed = true, ButtonMask = MouseButtonMask.Left }, true);
+        root.PushInput(new InputEventMouseButton { Position = menuPosition, GlobalPosition = menuPosition, ButtonIndex = MouseButton.Left, Pressed = false }, true);
+        for (int i = 0; i < 3; i++) await GameBridge.Frame();
+        Check(menuButton.GetPopup().Visible, "menu icon opens with a mouse click");
+        await root.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+        root.GetTexture().GetImage().SavePng(ProjectSettings.GlobalizePath("user://slpp-menu.png"));
+        menuButton.GetPopup().Hide();
         Press("SlppTimeline");
         for (int i = 0; i < 15; i++) await GameBridge.Frame();
         await root.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);

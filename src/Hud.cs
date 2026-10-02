@@ -50,17 +50,18 @@ internal static class Hud
         handle.MouseFilter = Control.MouseFilterEnum.Stop;
         handle.MouseDefaultCursorShape = Control.CursorShape.Drag;
         handle.TooltipText = "Drag to move";
-        handle.GuiInput += DragInput;
+        handle.GuiInput += input => DragInput(handle, input);
         row.AddChild(handle);
         _undo = Ui.Button("Undo", () => Run(() => Execute(Shortcut.Undo)), "SlppUndo");
-        _redo = Ui.Button("Redo", () => Run(() => Execute(Shortcut.Redo)), "SlppRedo");
+        _redo = Ui.Button("Redo", () => Run(() => Execute(Shortcut.Redo)), "SlppRedo", flip: true);
         row.AddChild(_undo);
         row.AddChild(_redo);
-        _menuButton = new MenuButton { Text = "Menu", Flat = true, FocusMode = Control.FocusModeEnum.None, CustomMinimumSize = new Vector2(68, 34), Name = "SlppMenuButton" };
-        _menuButton.AddThemeFontSizeOverride("font_size", 20);
+        _menuButton = new MenuButton { Name = "SlppMenuButton" };
+        Ui.Icon(_menuButton, Ui.MenuIcon, "Menu");
         row.AddChild(_menuButton);
         _menu = _menuButton.GetPopup();
         _menu.Name = "SlppMenu";
+        _menu.Theme = Ui.Theme;
         _menu.AddThemeFontSizeOverride("font_size", 20);
         foreach (var shortcut in new[] { Shortcut.PreviousTurn, Shortcut.NextTurn, Shortcut.RestartRoom, Shortcut.RestartSeed, Shortcut.RandomSeed, Shortcut.Timeline })
         {
@@ -108,7 +109,7 @@ internal static class Hud
 
     private static AcceptDialog Dialog(string title, string name, Vector2I size)
     {
-        var dialog = new AcceptDialog { Title = title, Name = name, MinSize = size, OkButtonText = "Close", Unresizable = true };
+        var dialog = new AcceptDialog { Theme = Ui.Theme, Title = title, Name = name, MinSize = size, OkButtonText = "Close", Unresizable = true };
         _layer!.AddChild(dialog);
         return dialog;
     }
@@ -175,11 +176,38 @@ internal static class Hud
         return Task.CompletedTask;
     }
 
-    private static void DragInput(InputEvent input)
+    private static void DragInput(Control handle, InputEvent input)
     {
-        if (input is not InputEventMouseButton { ButtonIndex: MouseButton.Left, Pressed: true }) return;
-        _dragging = true;
-        _dragOffset = _panel.GetGlobalMousePosition() - _panel.Position;
+        if (input is not InputEventMouse mouse) return;
+        Vector2 pointer = handle.GetGlobalTransform() * mouse.Position;
+        if (mouse is InputEventMouseButton { ButtonIndex: MouseButton.Left, Pressed: true } && !Recorder.Busy)
+        {
+            _dragging = true;
+            _dragOffset = pointer - _panel.Position;
+        }
+        else if (_dragging)
+        {
+            if (mouse is InputEventMouseMotion)
+            {
+                if ((mouse.ButtonMask & MouseButtonMask.Left) == 0) { SavePosition(); return; }
+                MoveToPointer(pointer);
+            }
+            else if (mouse is InputEventMouseButton { ButtonIndex: MouseButton.Left, Pressed: false })
+            {
+                MoveToPointer(pointer);
+                SavePosition();
+            }
+        }
+        handle.AcceptEvent();
+    }
+
+    private static void MoveToPointer(Vector2 position)
+    {
+        Vector2 viewport = _panel.GetViewportRect().Size;
+        Vector2 limit = (viewport - _panel.Size * _panel.Scale - Vector2.One * 8).Max(Vector2.One * 8);
+        _panel.Position = (position - _dragOffset).Clamp(Vector2.One * 8, limit);
+        SlppConfig.ToolbarX = _panel.Position.X / viewport.X;
+        SlppConfig.ToolbarY = _panel.Position.Y / viewport.Y;
     }
 
     private static void SavePosition()
@@ -198,11 +226,6 @@ internal static class Hud
     internal static bool HandleInput(InputEvent input)
     {
         if (_layer == null || _disabled) return false;
-        if (_dragging && input is InputEventMouse)
-        {
-            if (input is InputEventMouseButton { ButtonIndex: MouseButton.Left, Pressed: false }) SavePosition();
-            return true;
-        }
         if (input is not InputEventKey key) return false;
         if (!key.Pressed && Held.Remove(key.Keycode)) return true;
         if (!NGame.IsGameFocusedWindow()) { Held.Clear(); return false; }
@@ -228,6 +251,7 @@ internal static class Hud
         bool allowed = GameBridge.State == null || GameBridge.Singleplayer;
         _layer.Visible = allowed && GameBridge.State != null && !GameBridge.Manager.IsPaused && !SlppConfig.IsOpen;
         if (!_layer.Visible) { _history.Hide(); _shortcuts.Hide(); _menu.Hide(); }
+        if (_dragging && (!_layer.Visible || !SlppConfig.Toolbar || Recorder.Busy)) SavePosition();
         if (!NGame.IsGameFocusedWindow()) { Held.Clear(); if (_dragging) SavePosition(); }
         _panel.Visible = (SlppConfig.Toolbar && Recorder.History != null) || Recorder.Faulted;
         _status.Text = Recorder.Busy ? "Restoring..." : "History paused";
@@ -257,12 +281,7 @@ internal static class Hud
         Vector2 position = new(SlppConfig.AlignRight ? limit.X - 8 : 16, 88);
         if (float.IsFinite(SlppConfig.ToolbarX) && float.IsFinite(SlppConfig.ToolbarY) && SlppConfig.ToolbarX >= 0 && SlppConfig.ToolbarY >= 0)
             position = new Vector2(SlppConfig.ToolbarX, SlppConfig.ToolbarY) * viewport;
-        if (_dragging)
-        {
-            position = (_panel.GetGlobalMousePosition() - _dragOffset).Clamp(Vector2.One * 8, limit);
-            SlppConfig.ToolbarX = position.X / viewport.X;
-            SlppConfig.ToolbarY = position.Y / viewport.Y;
-        }
+        if (_dragging) position = _panel.Position;
         _panel.Position = position.Clamp(Vector2.One * 8, limit);
         RefreshHistory();
     }
