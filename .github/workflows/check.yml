@@ -18,5 +18,5 @@ jobs:
         with:
           dotnet-version: 9.0.x
       - run: sudo apt-get update && sudo apt-get install --no-install-recommends -y shellcheck
-      - run: ./lint.sh
-      - run: ./test.sh --unit
+      - run: ./scripts/lint.sh
+      - run: ./scripts/test.sh --unit

@@ -425,5 +425,6 @@ internal static class Recorder
         _needPoint = false;
         _generation++;
         _externalDepth = 0;
+        ExternalDecisions.Reset();
     }
 }

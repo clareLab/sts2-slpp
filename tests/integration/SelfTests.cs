@@ -517,6 +517,7 @@ internal static class SelfTests
     private static async Task TestPotions()
     {
         if (GameBridge.State != null) GameBridge.Manager.CleanUp();
+        Check(ExternalDecisions.RewardStack.Count == 0 && CrystalDecisions.Active == null, "run cleanup clears event and reward state");
         await NGame.Instance!.StartNewSingleplayerRun(ModelDb.Character<Ironclad>(), true, ActModel.GetDefaultList(), [], "SLPP-POTION", GameMode.Standard);
         await Settle("potion fixture start");
         await MegaCrit.Sts2.Core.Commands.PotionCmd.TryToProcure<MegaCrit.Sts2.Core.Models.Potions.StrengthPotion>(LocalContext.GetMe(GameBridge.State)!);

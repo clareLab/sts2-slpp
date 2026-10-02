@@ -14,10 +14,10 @@
     <Reference Include="GodotSharp"><HintPath>$(Sts2DataDir)/GodotSharp.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="0Harmony"><HintPath>$(Sts2DataDir)/0Harmony.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="BaseLib"><HintPath>$(BaseLibDll)</HintPath><Private>false</Private></Reference>
-    <Compile Remove="tests/**/*.cs" />
+    <Compile Include="../tests/integration/SelfTests.cs" Link="SelfTests.cs" />
   </ItemGroup>
   <Target Name="Package" AfterTargets="Build">
-    <MakeDir Directories="$(MSBuildProjectDirectory)/dist/slpp" />
-    <Copy SourceFiles="$(TargetPath);$(MSBuildProjectDirectory)/slpp.json;$(MSBuildProjectDirectory)/LICENSE" DestinationFolder="$(MSBuildProjectDirectory)/dist/slpp" />
+    <MakeDir Directories="$(ArtifactsPath)/dist/slpp" />
+    <Copy SourceFiles="$(TargetPath);$(MSBuildProjectDirectory)/slpp.json;$(MSBuildProjectDirectory)/../LICENSE" DestinationFolder="$(ArtifactsPath)/dist/slpp" />
   </Target>
 </Project>

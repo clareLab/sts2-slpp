@@ -26,7 +26,7 @@ public static class Entry
         }
         ((SceneTree)Engine.GetMainLoop()).ProcessFrame += Tick;
         ((SceneTree)Engine.GetMainLoop()).Root.TreeExiting += Recorder.OnCleanup;
-        GD.Print("[slpp] Loaded 0.3.0");
+        GD.Print($"[slpp] Loaded {typeof(Entry).Assembly.GetName().Version?.ToString(3)}");
     }
 
     private static void Tick()

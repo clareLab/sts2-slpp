@@ -6,6 +6,7 @@
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <AnalysisLevel>9.0</AnalysisLevel>
     <Deterministic>true</Deterministic>
-    <DefaultItemExcludes>$(DefaultItemExcludes);work/**;backups/**;validation/**;dist/**</DefaultItemExcludes>
+    <UseArtifactsOutput>true</UseArtifactsOutput>
+    <ArtifactsPath>$(MSBuildThisFileDirectory)artifacts</ArtifactsPath>
   </PropertyGroup>
 </Project>

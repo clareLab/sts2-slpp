@@ -1,11 +1,8 @@
+artifacts/
 bin/
 obj/
-dist/
 .vs/
 .idea/
-backups/
-validation/
-work/
 TestResults/
 *.user
 *.suo
