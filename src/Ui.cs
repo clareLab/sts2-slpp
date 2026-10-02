@@ -19,6 +19,65 @@ internal static class Ui
         return label;
     }
 
+    internal static Label WrappedText(string text, int size, float width)
+    {
+        var label = Text(text, size);
+        label.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        label.CustomMinimumSize = new Vector2(width, 0);
+        label.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        label.VerticalAlignment = VerticalAlignment.Center;
+        label.Resized += () => FitLabel(label, size);
+        return label;
+    }
+
+    internal static void FitLabel(Label label, int size)
+    {
+        label.AddThemeFontSizeOverride("font_size", FitFont(label.GetThemeFont("font"), label.Text, label.Size.X, size, 2));
+    }
+
+    internal static int FitFont(Font font, string text, float width, int size = 20, int lines = 3)
+    {
+        if (width <= 0) return size;
+        while (size > 14 && font.GetMultilineStringSize(text, width: width, fontSize: size,
+            brkFlags: TextServer.LineBreakFlag.Mandatory | TextServer.LineBreakFlag.WordBound | TextServer.LineBreakFlag.Adaptive).Y > font.GetHeight(size) * lines + 1)
+            size--;
+        return size;
+    }
+
+    internal static void FitTree(Tree tree)
+    {
+        if (tree.GetNodeOrNull<Label>("ColumnHeading") is { } heading)
+        {
+            float left = tree.GetThemeStylebox("panel").ContentMarginLeft + Enumerable.Range(0, tree.Columns - 1).Sum(tree.GetColumnWidth);
+            float top = tree.GetThemeStylebox("panel").ContentMarginTop;
+            float height = tree.GetThemeFont("title_button_font").GetHeight(tree.GetThemeFontSize("title_button_font_size")) + tree.GetThemeStylebox("title_button_normal").GetMinimumSize().Y;
+            heading.Position = new Vector2(left + 38, top);
+            heading.Size = new Vector2(Math.Max(1, tree.GetColumnWidth(tree.Columns - 1) - 46), height);
+        }
+        if (tree.GetRoot() is not { } root) return;
+        string layout = root.GetInstanceId() + ":" + string.Join(':', Enumerable.Range(0, tree.Columns).Select(tree.GetColumnWidth));
+        if (tree.GetMeta("slpp_layout", "").AsString() == layout) return;
+        tree.SetMeta("slpp_layout", layout);
+        var font = tree.GetThemeFont("font");
+        foreach (var item in root.GetChildren())
+        {
+            float height = font.GetHeight(20);
+            for (int column = 0; column < tree.Columns; column++)
+            {
+                float width = tree.GetColumnWidth(column) - 16;
+                if (item.GetIcon(column) is { } icon) width -= Math.Min(icon.GetWidth(), item.GetIconMaxWidth(column)) + 8;
+                width = Math.Max(1, width);
+                item.SetAutowrapMode(column, TextServer.AutowrapMode.WordSmart);
+                item.SetTextOverrunBehavior(column, TextServer.OverrunBehavior.NoTrimming);
+                int size = FitFont(font, item.GetText(column), width);
+                item.SetCustomFontSize(column, size);
+                height = Math.Max(height, font.GetMultilineStringSize(item.GetText(column), width: width, fontSize: size,
+                    brkFlags: TextServer.LineBreakFlag.Mandatory | TextServer.LineBreakFlag.WordBound | TextServer.LineBreakFlag.Adaptive).Y);
+            }
+            item.CustomMinimumHeight = (int)Math.Ceiling(height);
+        }
+    }
+
     internal static Button Button(string label, Action action, string name, bool flip = false)
     {
         var button = new Button { Name = name };
@@ -192,6 +251,9 @@ internal static class Ui
         theme.SetConstant("separation", "HSeparator", 10);
         theme.SetConstant("v_separation", "Tree", 8);
         theme.SetConstant("h_separation", "Tree", 8);
+        theme.SetConstant("inner_item_margin_left", "Tree", 0);
+        theme.SetConstant("inner_item_margin_right", "Tree", 8);
+        theme.SetFontSize("title_button_font_size", "Tree", 18);
         theme.SetStylebox("panel", "Tree", Surface("14232b", "526c75", 6));
         theme.SetStylebox("selected", "Tree", Surface("465c69", "d1ac60", 2));
         theme.SetStylebox("selected_focus", "Tree", Surface("465c69", "d1ac60", 2));

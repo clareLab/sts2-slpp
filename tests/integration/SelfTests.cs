@@ -34,6 +34,7 @@ internal static class SelfTests
         {
             if (!File.Exists(ProjectSettings.GlobalizePath("user://.slpp-test-sandbox")))
                 throw new InvalidOperationException("Self tests require an isolated user-data directory with .slpp-test-sandbox marker");
+            if (OS.GetCmdlineArgs().Contains("--slpp-suite=typesetting")) { await TestTypesetting(); return; }
             for (int i = 0; i < 180; i++) await GameBridge.Frame();
             SaveManager.Instance.SetFtuesEnabled(false);
             SaveManager.Instance.PrefsSave.FastMode = FastModeType.Instant;
@@ -51,6 +52,7 @@ internal static class SelfTests
             if (OS.GetCmdlineArgs().Contains("--slpp-suite=transitions")) { await TestTransitions(); return; }
             if (OS.GetCmdlineArgs().Contains("--slpp-suite=archive")) { await TestArchive(); return; }
             if (OS.GetCmdlineArgs().Contains("--slpp-suite=choices")) { await TestChoices(); return; }
+            if (OS.GetCmdlineArgs().Contains("--slpp-suite=lifecycle")) { await TestLifecycle(); return; }
             var run = await NGame.Instance!.StartNewSingleplayerRun(ModelDb.Character<Ironclad>(), true,
                 ActModel.GetDefaultList(), [], "SLPP-TEST-001", GameMode.Standard);
             var point = run.Map!.GetAllMapPoints().Where(p => p.PointType == MapPointType.Monster).OrderBy(p => p.coord.row).First();
@@ -79,6 +81,7 @@ internal static class SelfTests
             Recorder.Flush();
             GD.Print("[slpp] SELFTEST_CORE_OK");
             await TestChoices();
+            await TestLifecycle();
             await TestWorld();
             await TestCrystal();
             await TestPotions();
@@ -162,6 +165,13 @@ internal static class SelfTests
         int choice = Recorder.Room!.Points.FindIndex(p => p.AwaitingChoice);
         await Recorder.Restore(index, choice);
         Check(GameBridge.ChoiceOpen, "opening choice restores before the play phase");
+        AccessTools.Field(typeof(Recorder), "_resumePending").SetValue(null, true);
+        var premature = new EndPlayerTurnAction(LocalContext.GetMe(GameBridge.State)!, 1);
+        GameBridge.Manager.ActionQueueSynchronizer.RequestEnqueue(premature);
+        Check(premature.State == MegaCrit.Sts2.Core.Entities.Actions.GameActionState.Canceled, "pending resume rejects live combat input before replay begins");
+        Recorder.Tick();
+        await GameBridge.Until(() => !Recorder.Busy, "resume from opening choice");
+        Check(!Recorder.BlocksLiveActions && !Recorder.Faulted && GameBridge.ChoiceOpen, "automatic resume can finish at an opening choice without waiting for a play phase");
         var pending = (TaskCompletionSource<IEnumerable<CardModel>>)AccessTools.Field(typeof(NPlayerHand), "_selectionCompletionSource").GetValue(NPlayerHand.Instance)!;
         await Recorder.Restore(index, end);
         Check(pending.Task.IsCompleted, "leaving an opening choice releases its original waiter");
@@ -357,6 +367,40 @@ internal static class SelfTests
         Check(GameBridge.Fingerprint() == expected, "upgraded room reload stays deterministic");
         await Enter(MapPointType.Shop);
         await RoundTrip("shop after act transition");
+    }
+
+    private static async Task TestLifecycle()
+    {
+        if (GameBridge.State != null) GameBridge.CleanUp();
+        await NGame.Instance!.StartNewSingleplayerRun(ModelDb.Character<Ironclad>(), true, ActModel.GetDefaultList(), [], "SLPP-LIFECYCLE", GameMode.Standard);
+        await Enter(MapPointType.Monster);
+        string expected = GameBridge.Fingerprint();
+        var player = LocalContext.GetMe(GameBridge.State)!;
+        var synchronizer = GameBridge.Manager.ActionQueueSynchronizer;
+        var stale = new EndPlayerTurnAction(player, player.PlayerCombatState!.TurnNumber);
+        async Task LateAction()
+        {
+            await GameBridge.Frame();
+            Check(Recorder.Restoring && !CombatManager.Instance.IsInProgress, "late action arrives after combat cleanup during restore");
+            CombatManager.Instance.OnEndedTurnLocally();
+            synchronizer.RequestEnqueue(stale);
+            await GameBridge.Frame();
+            Check(stale.State == MegaCrit.Sts2.Core.Entities.Actions.GameActionState.Canceled && stale.CompletionTask.IsCanceled,
+                "external action is canceled and its waiter is released");
+        }
+        var late = LateAction();
+        var restore = Recorder.Restore(Recorder.History!.RoomCursor, 0);
+        await late;
+        await restore;
+        Check(!Recorder.Busy && !Recorder.Faulted && GameBridge.Fingerprint() == expected, "late end-turn callback cannot crash or alter a restored room");
+        player = LocalContext.GetMe(GameBridge.State)!;
+        CombatManager.Instance.OnEndedTurnLocally();
+        GameBridge.Manager.ActionQueueSynchronizer.RequestEnqueue(new EndPlayerTurnAction(player, player.PlayerCombatState!.TurnNumber));
+        await GameBridge.Until(() => GameBridge.Turn == 2 && GameBridge.Stable, "normal end turn after restore");
+        await Settle("turn checkpoint");
+        expected = GameBridge.Fingerprint();
+        await Recorder.Restore(Recorder.History.RoomCursor, Recorder.History.PointCursor);
+        Check(GameBridge.Turn == 2 && GameBridge.Fingerprint() == expected, "recorded end turn and internal turn synchronization still replay");
     }
 
     private static async Task TestArchive()
@@ -609,6 +653,22 @@ internal static class SelfTests
         await TestToolbarLayout(root, hash);
     }
 
+    private static async Task TestTypesetting()
+    {
+        var tree = new Tree { Theme = Ui.Theme, Columns = 3, HideRoot = true, HideFolding = true, Size = new Vector2(348, 200) };
+        ((SceneTree)Engine.GetMainLoop()).Root.AddChild(tree);
+        for (int column = 0; column < 2; column++) { tree.SetColumnExpand(column, false); tree.SetColumnCustomMinimumWidth(column, 56); }
+        var root = tree.CreateItem();
+        var item = tree.CreateItem(root);
+        item.SetText(2, string.Join(' ', Enumerable.Repeat("Long action name", 10)));
+        for (int i = 0; i < 5; i++) await GameBridge.Frame();
+        Ui.FitTree(tree);
+        for (int i = 0; i < 5; i++) await GameBridge.Frame();
+        GD.Print($"[slpp] FIT width={tree.GetColumnWidth(2)} font={item.GetCustomFontSize(2)} empty={item.GetCustomFontSize(0)} height={tree.GetItemAreaRect(item, 2).Size.Y} minimum={item.CustomMinimumHeight} line={tree.GetThemeFont("font").GetHeight(20)}");
+        Check(item.GetCustomFontSize(2) == 14 && item.GetCustomFontSize(0) == 20 && tree.GetItemAreaRect(item, 2).Size.Y > tree.GetThemeFont("font").GetHeight(20) * 3, "long cells fit independently and keep their full height");
+        tree.QueueFree();
+    }
+
     private static async Task TestLayout(bool previewOnly = false)
     {
         ResetSettings();
@@ -666,6 +726,11 @@ internal static class SelfTests
         Check(Widget<Label>("SlppBindingUndo").Text == "Alt+U", "shortcut list follows rebinding");
         SlppConfig.UndoKey = "Ctrl+Z";
         Hud.Tick();
+        for (int i = 0; i < 3; i++) await GameBridge.Frame();
+        Check(Math.Abs(Widget<Label>("SlppShortcutsTitle").GetGlobalRect().Position.X - Widget<Label>("SlppShortcutNameUndo").GetGlobalRect().Position.X) < 1,
+            "shortcut title aligns with its action column");
+        Check(Math.Abs(Widget<Button>("SlppShortcutsClose").GetGlobalRect().End.X - Widget<Label>("SlppBindingUndo").GetGlobalRect().End.X) < 1,
+            "shortcut close control aligns with the binding column");
         await root.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
         Check(root.GetTexture().GetImage().SavePng(ProjectSettings.GlobalizePath("user://slpp-help.png")) == Error.Ok, "shortcut list screenshot");
         Press("SlppShortcutsClose");
@@ -760,6 +825,42 @@ internal static class SelfTests
         await root.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
         Check(root.GetTexture().GetImage().SavePng(ProjectSettings.GlobalizePath("user://slpp-ui.png")) == Error.Ok, "aligned history dialog screenshot");
         var history = Widget<PanelContainer>("SlppHistory");
+        var points = Widget<Tree>("SlppPoints");
+        var rooms = Widget<Tree>("SlppRooms");
+        Check(Math.Abs(Widget<Label>("SlppHistoryTitle").GetGlobalRect().Position.X - rooms.GetGlobalRect().Position.X) < 1 &&
+            Math.Abs(Widget<Button>("SlppHistoryClose").GetGlobalRect().End.X - points.GetGlobalRect().End.X) < 1,
+            "history heading and controls align with both lists");
+        Check(points.HideFolding && rooms.HideFolding && points.GetThemeConstant("inner_item_margin_right") == points.GetThemeConstant("h_separation"),
+            "flat history columns have symmetric text insets");
+        foreach (var list in new[] { rooms, points })
+        {
+            var heading = list.GetNode<Label>("ColumnHeading");
+            float textLeft = list.GetItemAreaRect(list.GetRoot().GetFirstChild(), list.Columns - 1).Position.X + 38;
+            Check(Math.Abs(heading.Position.X - textLeft) < 1, list.Name + " heading aligns with names after the icon slot");
+        }
+        var wrapped = points.CreateItem(points.GetRoot());
+        wrapped.SetText(0, "123");
+        wrapped.SetText(1, "12");
+        wrapped.SetText(2, "Play Apotheosis on Decimillipede");
+        wrapped.SetTextAlignment(0, HorizontalAlignment.Center);
+        wrapped.SetTextAlignment(1, HorizontalAlignment.Center);
+        Ui.TreeIcon(wrapped, 2, Ui.ShortcutIcon(Shortcut.NextTurn));
+        var fitted = points.CreateItem(points.GetRoot());
+        fitted.SetText(2, string.Join(' ', Enumerable.Repeat("Long action name", 10)));
+        points.RemoveMeta("slpp_layout");
+        Ui.FitTree(points);
+        for (int i = 0; i < 5; i++) await GameBridge.Frame();
+        float lineHeight = points.GetThemeFont("font").GetHeight(20);
+        Check(wrapped.GetCustomFontSize(2) == 20 && points.GetItemAreaRect(wrapped, 2).Size.Y > lineHeight * 1.5f,
+            "history wraps long names before reducing their font size");
+        Check(fitted.GetCustomFontSize(2) == 14 && fitted.GetCustomFontSize(0) == 20 && points.GetItemAreaRect(fitted, 2).Size.Y > lineHeight * 3,
+            $"only overflowing cells shrink and exceptionally long rows remain fully visible (font={fitted.GetCustomFontSize(2)}, empty={fitted.GetCustomFontSize(0)}, height={points.GetItemAreaRect(fitted, 2).Size.Y}, width={points.GetColumnWidth(2)}, line={lineHeight})");
+        points.ScrollToItem(wrapped);
+        await root.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+        root.GetTexture().GetImage().SavePng(ProjectSettings.GlobalizePath("user://slpp-wrapping.png"));
+        wrapped.Free();
+        fitted.Free();
+        points.ScrollToItem(points.GetSelected());
         var toolbarRect = toolbar.GetGlobalRect();
         Check(history.Visible && history.Position.X == toolbar.Position.X && history.Position.Y >= toolbarRect.End.Y && history.Position.Y - toolbarRect.End.Y <= 9, "history extends directly below the toolbar");
 

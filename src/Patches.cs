@@ -6,6 +6,8 @@ using MegaCrit.Sts2.Core.GameActions;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Multiplayer.Replay;
 using MegaCrit.Sts2.Core.Saves;
+using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Entities.Multiplayer;
 
 namespace slpp;
 
@@ -26,6 +28,23 @@ internal static class ActionPatch
     {
         if (__instance.State == MegaCrit.Sts2.Core.Entities.Actions.GameActionState.WaitingForExecution)
             Recorder.Capture(() => Recorder.RecordAction(__instance));
+    }
+}
+
+[HarmonyPatch(typeof(CombatManager), nameof(CombatManager.OnEndedTurnLocally))]
+internal static class LiveEndTurnPatch
+{
+    static bool Prefix() => !Recorder.BlocksLiveActions;
+}
+
+[HarmonyPatch(typeof(ActionQueueSynchronizer), nameof(ActionQueueSynchronizer.RequestEnqueue))]
+internal static class LiveActionPatch
+{
+    static bool Prefix(GameAction action)
+    {
+        if (!Recorder.BlocksLiveActions || action.ActionType != GameActionType.CombatPlayPhaseOnly || ReferenceEquals(action, Recorder.ReplayingAction)) return true;
+        action.Cancel();
+        return false;
     }
 }
 

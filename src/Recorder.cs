@@ -23,6 +23,8 @@ internal static class Recorder
     internal static bool Busy { get; private set; }
     internal static bool Faulted { get; private set; }
     internal static bool WaitingForChoice { get; private set; }
+    internal static bool BlocksLiveActions => Restoring || _resumePending;
+    internal static GameAction? ReplayingAction { get; private set; }
     internal static string Status { get; private set; } = "Start a single-player run";
     internal static string? LastError { get; private set; }
     private static int _replayChoice;
@@ -121,7 +123,7 @@ internal static class Recorder
 
     internal static void RecordChoice(Player player, uint id, PlayerChoiceResult result)
     {
-        if (Restoring || Faulted || Room == null || !GameBridge.Singleplayer) return;
+        if (BlocksLiveActions || Faulted || Room == null || !GameBridge.Singleplayer) return;
         if (_atHistoricalPosition)
         {
             History!.Branch();
@@ -158,7 +160,7 @@ internal static class Recorder
 
     internal static void Tick()
     {
-        if (_resumePending && !Busy && GameBridge.Stable && History != null)
+        if (_resumePending && !Busy && (GameBridge.Stable || GameBridge.ChoiceOpen) && History != null)
         {
             _resumePending = false;
             Hud.Run(() => Restore(History.RoomCursor, History.PointCursor));
@@ -354,7 +356,9 @@ internal static class Recorder
             if (command.Kind == "action")
             {
                 var evt = GameBridge.Unpack<CombatReplayEvent>(command.Data);
-                GameBridge.Manager.ActionQueueSynchronizer.RequestEnqueue(evt.action!.ToGameAction(GameBridge.State!.GetPlayer(evt.playerId!.Value)!));
+                ReplayingAction = evt.action!.ToGameAction(GameBridge.State!.GetPlayer(evt.playerId!.Value)!);
+                try { GameBridge.Manager.ActionQueueSynchronizer.RequestEnqueue(ReplayingAction); }
+                finally { ReplayingAction = null; }
             }
             else ExternalDecisions.Execute(command);
             await WaitBoundary(i == target.Commands - 1);
@@ -513,6 +517,7 @@ internal static class Recorder
         Flush();
         _writeTask.GetAwaiter().GetResult();
         _detached = true;
+        _resumePending = false;
         _needPoint = false;
         _generation++;
         _externalDepth = 0;

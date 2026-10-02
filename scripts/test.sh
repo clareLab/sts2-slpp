@@ -63,7 +63,7 @@ if [[ "$mode" == ui ]]; then
   export DISPLAY
 fi
 for suite in "${suites[@]}"; do
-    case "$suite" in full|resume|settings|settings-resume|ui|world|characters|crystal|potions|choices|transitions|archive|layout|preview) ;; *) echo "Unknown test suite: $suite" >&2; exit 2 ;; esac
+    case "$suite" in full|resume|settings|settings-resume|ui|world|characters|crystal|potions|choices|transitions|archive|layout|preview|lifecycle|typesetting) ;; *) echo "Unknown test suite: $suite" >&2; exit 2 ;; esac
   args=(--audio-driver Dummy --force-steam=off --slpp-selftest --slpp-suite="$suite")
   if [[ "$suite" == ui || "$suite" == layout || "$suite" == preview ]]; then
     [[ "$mode" == ui ]] || { echo 'Use ./scripts/test.sh --ui for rendered tests.' >&2; exit 2; }

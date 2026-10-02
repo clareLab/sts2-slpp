@@ -135,15 +135,15 @@ internal static class Hud
         _shortcuts = Sheet("SlppShortcutList", 344, out var shortcuts);
         Header(shortcuts, "Shortcuts");
         var keys = new GridContainer { Columns = 2 };
-        keys.AddThemeConstantOverride("h_separation", 24);
+        keys.AddThemeConstantOverride("h_separation", 20);
         keys.AddThemeConstantOverride("v_separation", 12);
         shortcuts.AddChild(keys);
         foreach (var shortcut in Enum.GetValues<Shortcut>())
         {
-            var label = Ui.Text(SlppConfig.Name(shortcut), 20);
-            label.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+            var label = Ui.WrappedText(SlppConfig.Name(shortcut), 20, 148);
+            label.Name = "SlppShortcutName" + shortcut;
             keys.AddChild(label);
-            var key = Ui.Text("", 18);
+            var key = Ui.WrappedText("", 18, 148);
             key.Name = "SlppBinding" + shortcut;
             key.HorizontalAlignment = HorizontalAlignment.Right;
             key.VerticalAlignment = VerticalAlignment.Center;
@@ -169,14 +169,18 @@ internal static class Hud
     {
         var row = new HBoxContainer();
         row.AddThemeConstantOverride("separation", 8);
-        var back = Ui.Button("Back", () => ShowFlyout(_menu), "Slpp" + title + "Back");
-        back.CustomMinimumSize = new Vector2(28, 28);
-        back.Flat = true;
-        if (title == "History") back.QueueFree(); else row.AddChild(back);
         var label = Ui.Text(title, 22);
+        label.Name = "Slpp" + title + "Title";
         label.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         label.VerticalAlignment = VerticalAlignment.Center;
         row.AddChild(label);
+        if (title != "History")
+        {
+            var back = Ui.Button("Back", () => ShowFlyout(_menu), "Slpp" + title + "Back");
+            back.CustomMinimumSize = new Vector2(28, 28);
+            back.Flat = true;
+            row.AddChild(back);
+        }
         var close = new Button { Name = "Slpp" + title + "Close" };
         Ui.Icon(close, Ui.CloseIcon, "Close");
         close.CustomMinimumSize = new Vector2(28, 28);
@@ -240,6 +244,8 @@ internal static class Hud
             Columns = columns.Length,
             ColumnTitlesVisible = true,
             HideRoot = true,
+            HideFolding = true,
+            ScrollHorizontalEnabled = false,
             CustomMinimumSize = new Vector2(width, 120),
             SizeFlagsVertical = Control.SizeFlags.ExpandFill,
             SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
@@ -247,10 +253,15 @@ internal static class Hud
         };
         for (int i = 0; i < columns.Length; i++)
         {
-            list.SetColumnTitle(i, columns[i]);
+            list.SetColumnTitle(i, i == columns.Length - 1 ? "" : columns[i]);
+            list.SetColumnClipContent(i, true);
             list.SetColumnTitleAlignment(i, i == columns.Length - 1 ? HorizontalAlignment.Left : HorizontalAlignment.Center);
             if (i < columns.Length - 1) { list.SetColumnExpand(i, false); list.SetColumnCustomMinimumWidth(i, 56); }
         }
+        var heading = Ui.Text(columns[^1], 18);
+        heading.Name = "ColumnHeading";
+        heading.VerticalAlignment = VerticalAlignment.Center;
+        list.AddChild(heading);
         return list;
     }
 
@@ -402,7 +413,12 @@ internal static class Hud
             pair.Value.Button.GetChild<Control>(0).Modulate = pair.Value.Button.Disabled ? new Color("83918d") : Colors.White;
         }
         foreach (var pair in Bindings)
-            pair.Value.Text = !SlppConfig.Hotkeys || !SlppConfig.Enabled(pair.Key) ? "Off" : SlppConfig.Binding(pair.Key)?.ToString() ?? "Unbound";
+        {
+            string binding = !SlppConfig.Hotkeys || !SlppConfig.Enabled(pair.Key) ? "Off" : SlppConfig.Binding(pair.Key)?.ToString() ?? "Unbound";
+            if (pair.Value.Text == binding) continue;
+            pair.Value.Text = binding;
+            Ui.FitLabel(pair.Value, 18);
+        }
         Vector2 viewport = ((SceneTree)Engine.GetMainLoop()).Root.GetVisibleRect().Size;
         _shield.Size = viewport;
         _panel.Size = _panel.GetCombinedMinimumSize();
@@ -417,6 +433,7 @@ internal static class Hud
         _panel.Position = position.Clamp(Vector2.One * 8, limit);
         RefreshHistory();
         PositionFlyout();
+        if (_history.Visible) { Ui.FitTree(_rooms); Ui.FitTree(_points); }
         if (_history.Visible && _layer.Visible && !_resizing && !_dragging) HistoryPreview.Tick(_points, _rooms, _history, _layer);
         else HistoryPreview.Clear();
         if (_history.Visible) _resizeHandle.QueueRedraw();
