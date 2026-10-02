@@ -6,18 +6,16 @@ internal static class Ui
 {
     internal static Label Text(string text, int size = 20)
     {
-        var label = new Label { Text = text };
+        var label = new Label { Text = text, MouseFilter = Control.MouseFilterEnum.Ignore };
         label.AddThemeFontSizeOverride("font_size", size);
-        label.AddThemeColorOverride("font_color", new Color("e8e6dc"));
         return label;
     }
 
     internal static Button Button(string text, Action action, string name = "")
     {
-        var button = new Button { Text = text, FocusMode = Control.FocusModeEnum.None };
-        if (name != "") button.Name = name;
+        var button = new Button { Text = text, Flat = true, FocusMode = Control.FocusModeEnum.None, Name = name };
         button.AddThemeFontSizeOverride("font_size", 20);
-        button.CustomMinimumSize = new Vector2(0, 38);
+        button.CustomMinimumSize = new Vector2(68, 34);
         button.Pressed += action;
         return button;
     }
@@ -25,7 +23,7 @@ internal static class Ui
     internal static PanelContainer Panel()
     {
         var panel = new PanelContainer();
-        var style = new StyleBoxFlat
+        panel.AddThemeStyleboxOverride("panel", new StyleBoxFlat
         {
             BgColor = new Color("17201fee"),
             BorderColor = new Color("697364"),
@@ -33,12 +31,11 @@ internal static class Ui
             BorderWidthTop = 1,
             BorderWidthLeft = 1,
             BorderWidthRight = 1,
-            CornerRadiusTopLeft = 8,
-            CornerRadiusTopRight = 8,
-            CornerRadiusBottomLeft = 8,
-            CornerRadiusBottomRight = 8
-        };
-        panel.AddThemeStyleboxOverride("panel", style);
+            CornerRadiusTopLeft = 6,
+            CornerRadiusTopRight = 6,
+            CornerRadiusBottomLeft = 6,
+            CornerRadiusBottomRight = 6
+        });
         return panel;
     }
 

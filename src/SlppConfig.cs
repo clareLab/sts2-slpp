@@ -24,6 +24,8 @@ public sealed class SlppConfig : SimpleModConfig
     [ConfigSlider(80, 140, 5)]
     public static int Scale { get; set; } = 100;
     public static bool AlignRight { get; set; }
+    [ConfigHideInUI] public static float ToolbarX { get; set; } = -1;
+    [ConfigHideInUI] public static float ToolbarY { get; set; } = -1;
 
     [ConfigSection("Shortcuts")]
     [ConfigTextInput(KeyPattern, MaxLength = 64)] public static string UndoKey { get; set; } = "Ctrl+Z";
@@ -66,7 +68,7 @@ public sealed class SlppConfig : SimpleModConfig
         Shortcut.RestartRoom => "Restart room",
         Shortcut.RestartSeed => "Same seed",
         Shortcut.RandomSeed => "Random seed",
-        _ => "Timeline"
+        _ => "History"
     };
 
     internal static bool Enabled(Shortcut shortcut) => shortcut switch

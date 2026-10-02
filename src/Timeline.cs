@@ -42,7 +42,7 @@ public sealed class RoomRecord
 
 public sealed record RecordedCommand(string Kind, byte[] Data, int Index = 0, string Label = "");
 public sealed record RecordedChoice(uint Id, byte[] Data);
-public sealed record TimelinePoint(int Commands, int Choices, int Turn, bool AwaitingChoice, string Hash, string Label);
+public sealed record TimelinePoint(int Commands, int Choices, int Turn, bool AwaitingChoice, string Hash, string Label, int FingerprintVersion = 1);
 
 public static class TimelineFile
 {
@@ -78,6 +78,7 @@ public static class TimelineFile
                     throw new InvalidDataException("Invalid decision boundary");
                 if (p.Commands < commands || p.Choices < choices || p.Hash.Length != 64 || !p.Hash.All(Uri.IsHexDigit))
                     throw new InvalidDataException("Invalid decision ordering or checksum");
+                if (p.FingerprintVersion is < 1 or > 2) throw new InvalidDataException("Unsupported fingerprint version");
                 commands = p.Commands; choices = p.Choices;
             }
         }

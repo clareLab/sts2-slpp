@@ -12,6 +12,7 @@ public static class Entry
     public static bool SelfTest => OS.GetCmdlineArgs().Contains("--slpp-selftest");
     internal static bool AllowAutoResume => !SelfTest || OS.GetCmdlineArgs().Contains("--slpp-suite=resume");
     private static bool _started;
+    private static bool _hudFailed;
 
     public static void Initialize()
     {
@@ -25,22 +26,34 @@ public static class Entry
             return;
         }
         ((SceneTree)Engine.GetMainLoop()).ProcessFrame += Tick;
-        ((SceneTree)Engine.GetMainLoop()).Root.TreeExiting += Recorder.OnCleanup;
+        ((SceneTree)Engine.GetMainLoop()).Root.TreeExiting += () =>
+        {
+            try { Recorder.OnCleanup(); }
+            catch (Exception error) { GD.PrintErr("[slpp] Cleanup failed: " + error); }
+        };
         GD.Print($"[slpp] Loaded {typeof(Entry).Assembly.GetName().Version?.ToString(3)}");
     }
 
     private static void Tick()
     {
-        if (SaveManager.Instance.IsProfileInitialized && !Recorder.Busy)
+        try
         {
-            Recorder.CheckProfile();
+            if (!Recorder.Faulted)
+            {
+                if (SaveManager.Instance.IsProfileInitialized && !Recorder.Busy) Recorder.CheckProfile();
+                Recorder.Tick();
+            }
         }
-        Recorder.Tick();
-        Hud.Tick();
+        catch (Exception error) { Recorder.Suspend(error); }
+        if (!_hudFailed)
+        {
+            try { Hud.Tick(); }
+            catch (Exception error) { _hudFailed = true; Hud.Disable(); GD.PrintErr("[slpp] Toolbar disabled: " + error); }
+        }
         if (_started || NGame.Instance?.MainMenu == null || !SaveManager.Instance.IsProfileInitialized) return;
         _started = true;
-        SlppConfig.InstallLabels();
-        Hud.Install();
+        try { SlppConfig.InstallLabels(); Hud.Install(); }
+        catch (Exception error) { _hudFailed = true; Hud.Disable(); GD.PrintErr("[slpp] Toolbar unavailable: " + error); }
         GD.Print("[slpp] Main menu ready");
         if (SelfTest) _ = SelfTests.Run();
     }

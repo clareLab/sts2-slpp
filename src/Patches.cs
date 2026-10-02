@@ -12,7 +12,11 @@ namespace slpp;
 [HarmonyPatch(typeof(CombatReplayWriter), nameof(CombatReplayWriter.RecordInitialState))]
 internal static class InitialStatePatch
 {
-    static void Postfix(SerializableRun serializableRun) => Recorder.BeginRoom(serializableRun);
+    static void Postfix(SerializableRun serializableRun)
+    {
+        try { Recorder.BeginRoom(serializableRun); }
+        catch (Exception error) { Recorder.Suspend(error); }
+    }
 }
 
 [HarmonyPatch(typeof(GameAction), nameof(GameAction.Execute))]
@@ -21,14 +25,14 @@ internal static class ActionPatch
     static void Prefix(GameAction __instance)
     {
         if (__instance.State == MegaCrit.Sts2.Core.Entities.Actions.GameActionState.WaitingForExecution)
-            Recorder.RecordAction(__instance);
+            Recorder.Capture(() => Recorder.RecordAction(__instance));
     }
 }
 
 [HarmonyPatch(typeof(PlayerChoiceSynchronizer), nameof(PlayerChoiceSynchronizer.SyncLocalChoice))]
 internal static class ChoicePatch
 {
-    static void Prefix(Player player, uint choiceId, PlayerChoiceResult result) => Recorder.RecordChoice(player, choiceId, result);
+    static void Prefix(Player player, uint choiceId, PlayerChoiceResult result) => Recorder.Capture(() => Recorder.RecordChoice(player, choiceId, result));
 }
 
 [HarmonyPatch(typeof(CardSelectCmd), "ShouldSelectLocalCard")]
@@ -65,7 +69,7 @@ internal static class SaveDuringRestorePatch
     };
     static bool Prefix(ref Task __result)
     {
-        if (!Recorder.Restoring && !Recorder.Faulted) return true;
+        if (!Recorder.Restoring) return true;
         __result = Task.CompletedTask;
         return false;
     }
@@ -74,13 +78,13 @@ internal static class SaveDuringRestorePatch
 [HarmonyPatch(typeof(SaveManager), nameof(SaveManager.SaveProgressFile))]
 internal static class ProgressWritePatch
 {
-    static bool Prefix() => !Recorder.Restoring && !Recorder.Faulted;
+    static bool Prefix() => !Recorder.Restoring;
 }
 
 [HarmonyPatch(typeof(MegaCrit.Sts2.Core.Saves.Managers.ProgressSaveManager), "SaveProgress")]
 internal static class ProgressManagerWritePatch
 {
-    static bool Prefix() => !Recorder.Restoring && !Recorder.Faulted;
+    static bool Prefix() => !Recorder.Restoring;
 }
 
 [HarmonyPatch]
@@ -91,19 +95,23 @@ internal static class PersistentEffectsPatch
         AccessTools.Method(typeof(SaveManager), nameof(SaveManager.SaveRunHistory)),
         AccessTools.Method(typeof(SaveManager), nameof(SaveManager.DeleteCurrentRun))
     };
-    static bool Prefix() => !Recorder.Restoring && !Recorder.Faulted;
+    static bool Prefix() => !Recorder.Restoring;
 }
 
 [HarmonyPatch(typeof(MegaCrit.Sts2.Core.Runs.RunManager), nameof(MegaCrit.Sts2.Core.Runs.RunManager.CleanUp))]
 internal static class CleanupPatch
 {
-    static void Prefix() => Recorder.OnCleanup();
+    static void Prefix()
+    {
+        try { Recorder.OnCleanup(); }
+        catch (Exception error) { Recorder.Suspend(error); }
+    }
 }
 
 [HarmonyPatch(typeof(MegaCrit.Sts2.Core.Nodes.CommonUi.NHotkeyManager), "_UnhandledInput")]
 internal static class ReplayInputPatch
 {
-    static bool Prefix() => !Recorder.Busy && !Recorder.Faulted;
+    static bool Prefix() => !Recorder.Busy && !Hud.ModalOpen;
 }
 
 [HarmonyPatch(typeof(MegaCrit.Sts2.Core.Nodes.NGame), "_Input")]
@@ -111,8 +119,12 @@ internal static class ShortcutInputPatch
 {
     static bool Prefix(MegaCrit.Sts2.Core.Nodes.NGame __instance, Godot.InputEvent inputEvent)
     {
-        if (!Hud.HandleInput(inputEvent)) return true;
-        __instance.GetViewport().SetInputAsHandled();
-        return false;
+        try
+        {
+            if (!Hud.HandleInput(inputEvent)) return true;
+            __instance.GetViewport().SetInputAsHandled();
+            return false;
+        }
+        catch (Exception error) { Hud.Disable(); Godot.GD.PrintErr("[slpp] Shortcuts disabled: " + error); return true; }
     }
 }

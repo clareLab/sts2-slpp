@@ -48,7 +48,7 @@ if command -v steam-run >/dev/null; then runner=(steam-run); fi
 read -r -a suites <<< "${SLPP_TEST_SUITES:-full resume settings settings-resume}"
 if [[ "$mode" == ui ]]; then
   command -v Xvfb >/dev/null || { echo 'Xvfb is required for UI tests.' >&2; exit 1; }
-  suites=(ui)
+  read -r -a suites <<< "${SLPP_TEST_SUITES:-ui}"
   display_file="$sandbox_dir/display"
   Xvfb -displayfd 3 -screen 0 1280x720x24 -nolisten tcp 3> "$display_file" > artifacts/validation/display.log 2>&1 &
   display_pid=$!
@@ -63,9 +63,9 @@ if [[ "$mode" == ui ]]; then
   export DISPLAY
 fi
 for suite in "${suites[@]}"; do
-  case "$suite" in full|resume|settings|settings-resume|ui|world|characters|crystal|potions|choices) ;; *) echo "Unknown test suite: $suite" >&2; exit 2 ;; esac
+    case "$suite" in full|resume|settings|settings-resume|ui|world|characters|crystal|potions|choices|transitions|archive|layout) ;; *) echo "Unknown test suite: $suite" >&2; exit 2 ;; esac
   args=(--audio-driver Dummy --force-steam=off --slpp-selftest --slpp-suite="$suite")
-  if [[ "$suite" == ui ]]; then
+  if [[ "$suite" == ui || "$suite" == layout ]]; then
     [[ "$mode" == ui ]] || { echo 'Use ./scripts/test.sh --ui for rendered tests.' >&2; exit 2; }
     args+=(--display-driver x11 --rendering-method gl_compatibility --rendering-driver opengl3 --windowed --resolution 1280x720)
   else args+=(--headless); fi
@@ -83,9 +83,13 @@ r=json.load(open(sys.argv[1]))
 assert r['success'], r['error']
 print(f"PASS {len(r['passed'])} checks, game {r['gameBuild']}")
 PY
-  if [[ "$suite" == ui ]]; then
-    cp "$sandbox_dir/userdata/SlayTheSpire2/slpp-settings.png" artifacts/validation/settings.png
-    cp "$sandbox_dir/userdata/SlayTheSpire2/slpp-shortcuts.png" artifacts/validation/shortcuts.png
+  if [[ "$suite" == ui || "$suite" == layout ]]; then
+    if [[ "$suite" == ui ]]; then
+      cp "$sandbox_dir/userdata/SlayTheSpire2/slpp-settings.png" artifacts/validation/settings.png
+      cp "$sandbox_dir/userdata/SlayTheSpire2/slpp-shortcuts.png" artifacts/validation/shortcuts.png
+    fi
     cp "$sandbox_dir/userdata/SlayTheSpire2/slpp-ui.png" artifacts/validation/interface.png
+    cp "$sandbox_dir/userdata/SlayTheSpire2/slpp-toolbar.png" artifacts/validation/toolbar.png
+    cp "$sandbox_dir/userdata/SlayTheSpire2/slpp-help.png" artifacts/validation/shortcuts-help.png
   fi
 done

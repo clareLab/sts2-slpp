@@ -39,6 +39,7 @@ internal static class SelfTests
             SaveManager.Instance.PrefsSave.FastMode = FastModeType.Instant;
             if (OS.GetCmdlineArgs().Contains("--slpp-suite=resume")) { await TestResume(); return; }
             if (OS.GetCmdlineArgs().Contains("--slpp-suite=ui")) { await TestUi(); return; }
+            if (OS.GetCmdlineArgs().Contains("--slpp-suite=layout")) { await TestLayout(); return; }
             if (OS.GetCmdlineArgs().Contains("--slpp-suite=settings")) { await TestSettings(); return; }
             if (OS.GetCmdlineArgs().Contains("--slpp-suite=settings-resume")) { TestSettingsResume(); return; }
             SaveManager.Instance.Progress.GetOrCreateCharacterStats(ModelDb.Character<Ironclad>().Id).TotalLosses = 2;
@@ -46,6 +47,8 @@ internal static class SelfTests
             if (OS.GetCmdlineArgs().Contains("--slpp-suite=characters")) { await TestCharacters(); return; }
             if (OS.GetCmdlineArgs().Contains("--slpp-suite=crystal")) { await TestCrystal(); return; }
             if (OS.GetCmdlineArgs().Contains("--slpp-suite=potions")) { await TestPotions(); return; }
+            if (OS.GetCmdlineArgs().Contains("--slpp-suite=transitions")) { await TestTransitions(); return; }
+            if (OS.GetCmdlineArgs().Contains("--slpp-suite=archive")) { await TestArchive(); return; }
             if (OS.GetCmdlineArgs().Contains("--slpp-suite=choices")) { await TestChoices(); return; }
             var run = await NGame.Instance!.StartNewSingleplayerRun(ModelDb.Character<Ironclad>(), true,
                 ActModel.GetDefaultList(), [], "SLPP-TEST-001", GameMode.Standard);
@@ -78,6 +81,7 @@ internal static class SelfTests
             await TestWorld();
             await TestCrystal();
             await TestPotions();
+            await TestTransitions();
             await TestCharacters();
         }
         catch (Exception ex)
@@ -290,6 +294,45 @@ internal static class SelfTests
         Check(!CombatManager.Instance.IsInProgress && LocalContext.GetMe(GameBridge.State)!.Creature.CurrentHp > 0, "natural combat victory");
     }
 
+    private static async Task TestTransitions()
+    {
+        if (GameBridge.State != null) GameBridge.Manager.CleanUp();
+        await NGame.Instance!.StartNewSingleplayerRun(ModelDb.Character<Ironclad>(), true,
+            ActModel.GetDefaultList(), [], "SLPP-WORLD-001", GameMode.Standard);
+        await Enter(MapPointType.Monster);
+        await WinCombat();
+        await GameBridge.Manager.EnterAct(1, false);
+        await GameBridge.Manager.EnterMapCoord(GameBridge.State!.Map!.StartingMapPoint.coord);
+        await Settle("ancient after combat");
+        Check(GameBridge.State.CurrentRoom is EventRoom, "next act ancient fixture");
+        string expected = GameBridge.Fingerprint();
+        var point = Recorder.Room!.Points[0];
+        Recorder.Room.Points[0] = point with
+        {
+            Hash = GameBridge.Fingerprint(1),
+            FingerprintVersion = 1,
+            Turn = LocalContext.GetMe(GameBridge.State)!.PlayerCombatState!.TurnNumber
+        };
+        await Recorder.Restore(Recorder.History!.RoomCursor, 0);
+        Check(GameBridge.Fingerprint() == expected, "ancient room reload after combat");
+        Check(Recorder.Room.Points[0].FingerprintVersion == 2, "legacy noncombat checksum verified and upgraded");
+        Check(GameBridge.Turn == 0, "previous combat turn excluded from event history");
+        await Recorder.Restore(Recorder.History.RoomCursor, 0);
+        Check(GameBridge.Fingerprint() == expected, "upgraded room reload stays deterministic");
+        await Enter(MapPointType.Shop);
+        await RoundTrip("shop after act transition");
+    }
+
+    private static async Task TestArchive()
+    {
+        string path = System.Environment.GetEnvironmentVariable("SLPP_TEST_ARCHIVE") ?? throw new InvalidOperationException("SLPP_TEST_ARCHIVE is required");
+        var history = TimelineFile.ReadWithBackup(path);
+        AccessTools.Property(typeof(Recorder), nameof(Recorder.History)).SetValue(null, history);
+        await Recorder.Restore(history.RoomCursor, history.PointCursor);
+        Check(!Recorder.Faulted && GameBridge.Stable, "archived player room restored");
+        Check(history.Current!.Points[history.PointCursor].FingerprintVersion == 2, "player history migrated with checksum verification");
+    }
+
     private static async Task TestCharacters()
     {
         foreach (var character in new CharacterModel[] { ModelDb.Character<Ironclad>(), ModelDb.Character<Silent>(), ModelDb.Character<Defect>(), ModelDb.Character<Regent>(), ModelDb.Character<Necrobinder>() })
@@ -369,7 +412,13 @@ internal static class SelfTests
     }
 
     private static T Widget<T>(string name) where T : Node => GameBridge.Descendants(((SceneTree)Engine.GetMainLoop()).Root).OfType<T>().Single(n => n.Name == name);
-    private static void Press(string name) => Widget<Button>(name).EmitSignal(Button.SignalName.Pressed);
+    private static void Press(string name)
+    {
+        if (name == "SlppShortcuts") Widget<MenuButton>("SlppMenuButton").GetPopup().EmitSignal(PopupMenu.SignalName.IdPressed, 100);
+        else if (name == "SlppResetPosition") Widget<MenuButton>("SlppMenuButton").GetPopup().EmitSignal(PopupMenu.SignalName.IdPressed, 101);
+        else if (name == "SlppTimeline") Widget<MenuButton>("SlppMenuButton").GetPopup().EmitSignal(PopupMenu.SignalName.IdPressed, (int)Shortcut.Timeline);
+        else Widget<Button>(name).EmitSignal(Button.SignalName.Pressed);
+    }
     private static InputEventKey KeyEvent(Key key, bool ctrl = false, bool shift = false, bool pressed = true) =>
         new() { Keycode = key, PhysicalKeycode = key, CtrlPressed = ctrl, ShiftPressed = shift, Pressed = pressed };
     private static void ResetSettings() => AccessTools.Method(typeof(ModConfig), "RestoreDefaultsNoConfirm").Invoke(SlppConfig.Instance, null);
@@ -410,6 +459,8 @@ internal static class SelfTests
         Check(!KeyChord.TryParse("Ctrl+Ctrl+Z", out _) && !KeyChord.TryParse("Garbage", out _), "malformed shortcuts never execute");
         SlppConfig.Scale = 120;
         SlppConfig.AlignRight = true;
+        SlppConfig.ToolbarX = .4f;
+        SlppConfig.ToolbarY = .3f;
         SlppConfig.Instance.Changed();
         NGame.Instance!.MainMenu!.SubmenuStack.Pop();
         for (int i = 0; i < 3; i++) await GameBridge.Frame();
@@ -428,6 +479,7 @@ internal static class SelfTests
     {
         Check(!SlppConfig.Toolbar && !SlppConfig.Turns && SlppConfig.Scale == 120 && SlppConfig.AlignRight, "BaseLib settings survive process restart");
         Check(SlppConfig.UndoKey == "E" && SlppConfig.RedoKey == "", "BaseLib shortcuts survive process restart");
+        Check(SlppConfig.ToolbarX == .4f && SlppConfig.ToolbarY == .3f, "toolbar position survives process restart");
         ResetSettings();
         Check(SlppConfig.Toolbar && SlppConfig.Turns && SlppConfig.UndoKey == "Ctrl+Z", "BaseLib reset restores defaults");
     }
@@ -508,10 +560,71 @@ internal static class SelfTests
         ResetSettings();
         await SendKey(Key.F9);
         Check(!SlppConfig.IsOpen && !Recorder.Busy, "removed F9 settings shortcut stays inactive");
+        await TestToolbarLayout(root, hash);
+    }
+
+    private static async Task TestLayout()
+    {
+        ResetSettings();
+        if (GameBridge.State != null) GameBridge.Manager.CleanUp();
+        await NGame.Instance!.StartNewSingleplayerRun(ModelDb.Character<Ironclad>(), true, ActModel.GetDefaultList(), [], "SLPP-UI", GameMode.Standard);
+        await Enter(MapPointType.Monster);
+        await TestToolbarLayout(((SceneTree)Engine.GetMainLoop()).Root, GameBridge.Fingerprint());
+    }
+
+    private static async Task TestToolbarLayout(Window root, string hash)
+    {
+        Press("SlppShortcuts");
+        for (int i = 0; i < 3; i++) await GameBridge.Frame();
+        Hud.Tick();
+        var shortcuts = Widget<AcceptDialog>("SlppShortcutList");
+        Check(shortcuts.Visible && Widget<Label>("SlppBindingUndo").Text == "Ctrl+Z", "menu opens current shortcut list");
+        SlppConfig.UndoKey = "Alt+U";
+        Hud.Tick();
+        Check(Widget<Label>("SlppBindingUndo").Text == "Alt+U", "shortcut list follows rebinding");
+        SlppConfig.UndoKey = "Ctrl+Z";
+        Hud.Tick();
+        await root.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+        Check(shortcuts.GetTexture().GetImage().SavePng(ProjectSettings.GlobalizePath("user://slpp-help.png")) == Error.Ok, "shortcut list screenshot");
+        shortcuts.GetOkButton().EmitSignal(Button.SignalName.Pressed);
+        DisplayServer.WindowMoveToForeground();
+        for (int i = 0; i < 8; i++) await GameBridge.Frame();
+        Check(!shortcuts.Visible && !Hud.ModalOpen, "shortcut dialog closes and releases input");
+        var toolbar = Widget<PanelContainer>("SlppToolbar");
+        Check(toolbar.Size.X < 300 && toolbar.Size.Y < 55, "idle toolbar remains a compact single row");
+        var origin = toolbar.Position;
+        var handle = Widget<Label>("SlppDragHandle");
+        Vector2 start = handle.GetGlobalRect().GetCenter();
+        root.WarpMouse(start);
+        for (int i = 0; i < 3; i++) await GameBridge.Frame();
+        root.PushInput(new InputEventMouseButton { Position = start, GlobalPosition = start, ButtonIndex = MouseButton.Left, Pressed = true, ButtonMask = MouseButtonMask.Left }, true);
+        await GameBridge.Frame();
+        Vector2 moved = start + new Vector2(180, 120);
+        root.WarpMouse(moved);
+        root.PushInput(new InputEventMouseMotion { Position = moved, GlobalPosition = moved, ButtonMask = MouseButtonMask.Left, Relative = moved - start }, true);
+        for (int i = 0; i < 3; i++) await GameBridge.Frame();
+        root.PushInput(new InputEventMouseButton { Position = moved, GlobalPosition = moved, ButtonIndex = MouseButton.Left, Pressed = false }, true);
+        await GameBridge.Frame();
+        GD.Print($"[slpp] DRAG origin={origin} actual={toolbar.Position} handle={start} pointer={toolbar.GetGlobalMousePosition()}");
+        Check(toolbar.Position.DistanceTo(origin + new Vector2(180, 120)) < 3, "drag handle moves toolbar without executing actions");
+        Check(GameBridge.Fingerprint() == hash && SlppConfig.ToolbarX > 0 && SlppConfig.ToolbarY > 0, "dragging preserves game state and persists position");
+        var savedPosition = toolbar.Position;
+        SlppConfig.ToolbarX = SlppConfig.ToolbarY = -1;
+        SlppConfig.Instance.Load();
+        Hud.Tick();
+        Check(toolbar.Position.DistanceTo(savedPosition) < 3, "toolbar position reloads from BaseLib config");
+        SlppConfig.ToolbarX = SlppConfig.ToolbarY = 1;
+        Hud.Tick();
+        Check(toolbar.GetGlobalRect().End.X <= root.GetVisibleRect().Size.X && toolbar.GetGlobalRect().End.Y <= root.GetVisibleRect().Size.Y, "toolbar stays inside viewport");
+        Press("SlppResetPosition");
+        Hud.Tick();
+        Check(toolbar.Position.DistanceTo(origin) < 3 && SlppConfig.ToolbarX == -1, "reset returns toolbar to its default position");
+        await root.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+        Check(root.GetTexture().GetImage().SavePng(ProjectSettings.GlobalizePath("user://slpp-toolbar.png")) == Error.Ok, "compact toolbar screenshot");
         Press("SlppTimeline");
         for (int i = 0; i < 15; i++) await GameBridge.Frame();
         await root.ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
-        Check(root.GetTexture().GetImage().SavePng(ProjectSettings.GlobalizePath("user://slpp-ui.png")) == Error.Ok, "SL toolbar screenshot");
+        Check(Widget<AcceptDialog>("SlppHistory").GetTexture().GetImage().SavePng(ProjectSettings.GlobalizePath("user://slpp-ui.png")) == Error.Ok, "aligned history dialog screenshot");
     }
 
     private static async Task TestPotions()
@@ -537,9 +650,22 @@ internal static class SelfTests
         try { await Recorder.Restore(Recorder.History!.RoomCursor, 0); }
         catch (InvalidOperationException) { failed = true; }
         Check(failed && Recorder.Faulted, "checksum mismatch stops replay and recording");
+        Hud.Tick();
+        Check(!Recorder.Busy && !Recorder.Restoring && !Widget<ColorRect>("SlppInputShield").Visible, "failed replay releases input after room recovery");
+        Check(GameBridge.Fingerprint() == original.Hash, "failed replay recovers a clean room state");
+        await SaveManager.Instance.SaveRun(null);
+        Check(SaveManager.Instance.CurrentRunSaveTask?.IsFaulted != true, "native saving remains available after recorder failure");
         Check(before.SequenceEqual(File.ReadAllBytes(Recorder.PathFor(Recorder.History!))), "failed restore preserves committed journal");
         Recorder.Room.Points[0] = original;
         await Recorder.Restore(Recorder.History!.RoomCursor, 0);
         Check(!Recorder.Faulted && GameBridge.Fingerprint() == original.Hash, "room anchor recovers after rejected replay");
+        Recorder.Capture(() => throw new InvalidOperationException("Injected recorder error"));
+        player = LocalContext.GetMe(GameBridge.State)!;
+        var card = player.PlayerCombatState!.Hand.Cards.First(c => c.CanPlay());
+        GameBridge.Manager.ActionQueueSynchronizer.RequestEnqueue(new PlayCardAction(card, card.TargetType == TargetType.AnyEnemy ? player.Creature.CombatState!.HittableEnemies.First() : null));
+        await CompleteAnySelection();
+        Check(Recorder.Faulted && GameBridge.Fingerprint() != original.Hash && !Recorder.Busy, "recording exception does not prevent playing cards");
+        await Enter(MapPointType.Shop);
+        Check(!Recorder.Faulted && Recorder.Room!.Points.Count > 0, "recording resumes at the next room boundary");
     }
 }

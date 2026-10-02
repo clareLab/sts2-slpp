@@ -57,7 +57,8 @@ internal static class Recorder
 
     internal static void BeginRoom(SerializableRun save)
     {
-        if (Restoring || Faulted || !GameBridge.Singleplayer) return;
+        if (Restoring || !GameBridge.Singleplayer) return;
+        Faulted = false;
         string key = save.StartTime + "-" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(save.SerializableRng.Seed ?? ""))).Substring(0, 12);
         _profileDirectory ??= ProfileDirectory;
         if (Entry.AllowAutoResume && History?.RunKey != key && File.Exists(Path.Combine(_profileDirectory, key + ".slpp")))
@@ -179,14 +180,14 @@ internal static class Recorder
     {
         if (Room == null) return;
         if (Room.Points.Count == 0)
-            Room.Label = $"Act {GameBridge.State!.CurrentActIndex + 1} · Floor {Room.Floor} · " + (GameBridge.State.CurrentRoom?.RoomType.ToString() switch
-            { "Monster" => "Combat", "Elite" => "Elite", "Boss" => "Boss", "Event" => "Event", "Shop" => "Shop", "RestSite" => "Rest site", "Treasure" => "Treasure", _ => "Room" });
-        var point = new TimelinePoint(Room.Commands.Count, Room.Choices.Count, GameBridge.Turn, choice, GameBridge.Fingerprint(), label);
+            Room.Label = GameBridge.State!.CurrentRoom?.RoomType.ToString() switch
+            { "Monster" => "Combat", "Elite" => "Elite", "Boss" => "Boss", "Event" => "Event", "Shop" => "Shop", "RestSite" => "Rest site", "Treasure" => "Treasure", _ => "Room" };
+        var point = new TimelinePoint(Room.Commands.Count, Room.Choices.Count, GameBridge.Turn, choice, GameBridge.Fingerprint(), label, 2);
         if (Room.Points.LastOrDefault() is { } last && last.Commands == point.Commands && last.Choices == point.Choices && last.AwaitingChoice == choice)
             return;
         Room.Points.Add(point);
         History!.PointCursor = Room.Points.Count - 1;
-        Status = $"{Room.Label} · Turn {point.Turn} · Step {History.PointCursor}";
+        Status = $"Step {History.PointCursor}";
         MarkDirty();
         GD.Print($"[slpp] Point {History.PointCursor}: {point.Label} cmd={point.Commands} choices={point.Choices} hash={point.Hash[..8]}");
     }
@@ -221,6 +222,8 @@ internal static class Recorder
             throw new InvalidOperationException("Game version or content index does not match this history");
         var room = History.Rooms[roomIndex];
         var target = room.Points[pointIndex];
+        var recoveryRoom = Room ?? room;
+        int recoveryIndex = History.RoomCursor;
         Busy = true;
         try
         {
@@ -248,40 +251,45 @@ internal static class Recorder
             var progressJson = JsonSerializer.Serialize(originalProgress.ToSerializable(), JsonSerializationUtility.GetTypeInfo<SerializableProgress>());
             SaveManager.Instance.Progress = ProgressState.FromSerializable(JsonSerializer.Deserialize(progressJson, JsonSerializationUtility.GetTypeInfo<SerializableProgress>())!, new DeserializationContext());
             SaveManager.Instance.PrefsSave.FastMode = FastModeType.Instant;
-            await GameBridge.Load(room);
-            await WaitBoundary(target.Commands == 0);
-            for (int i = 0; i < target.Commands; i++)
-            {
-                var command = room.Commands[i];
-                if (command.Kind == "action")
-                {
-                    var evt = GameBridge.Unpack<CombatReplayEvent>(command.Data);
-                    GameBridge.Manager.ActionQueueSynchronizer.RequestEnqueue(evt.action!.ToGameAction(GameBridge.State!.GetPlayer(evt.playerId!.Value)!));
-                }
-                else ExternalDecisions.Execute(command);
-                await WaitBoundary(i == target.Commands - 1);
-            }
-            if (_replayChoice != target.Choices) throw new InvalidOperationException("Recorded choices were not fully consumed");
-            string actual = GameBridge.Fingerprint();
+            await Replay(room, target);
+            string actual = GameBridge.Fingerprint(target.FingerprintVersion);
+            if (actual != target.Hash && target.FingerprintVersion == 1 && !GameBridge.InCombatRoom && target.Turn > 0)
+                actual = await CheckLegacyBoundary(roomIndex, room, target, actual);
             if (actual != target.Hash)
                 throw new InvalidOperationException($"Replay state mismatch: {actual[..8]} != {target.Hash[..8]}");
+            if (target.FingerprintVersion == 1)
+                room.Points[pointIndex] = target with { Hash = GameBridge.Fingerprint(), Turn = GameBridge.Turn, FingerprintVersion = 2 };
             History.RoomCursor = roomIndex;
             History.PointCursor = pointIndex;
             _atHistoricalPosition = true;
             Faulted = false;
             _needPoint = false;
-            Status = $"Restored · {room.Label} · Turn {target.Turn} · Step {pointIndex} ({watch.ElapsedMilliseconds} ms)";
-            GD.Print("[slpp] RESTORE_OK " + Status);
+            Status = "Restored";
+            GD.Print($"[slpp] RESTORE_OK Floor {room.Floor} Step {pointIndex} ({watch.ElapsedMilliseconds} ms)");
             MarkDirty();
             completed = true;
         }
         catch (Exception ex)
         {
-            Faulted = true;
-            _needPoint = _dirty = false;
-            LastError = ex.ToString();
-            Status = "Restore failed. Restart the room or choose another step: " + ex.Message;
-            GD.PrintErr("[slpp] " + LastError);
+            Suspend(ex);
+            try
+            {
+                _generation++;
+                _externalDepth = 0;
+                _target = null;
+                _replayRoom = null;
+                await GameBridge.Load(recoveryRoom);
+                await GameBridge.Until(() => GameBridge.Stable, "Room recovery timed out");
+                History.RoomCursor = recoveryIndex;
+                History.PointCursor = 0;
+                _atHistoricalPosition = true;
+                Status = "Room reloaded. History paused.";
+            }
+            catch (Exception recoveryError)
+            {
+                GD.PrintErr("[slpp] Room recovery failed: " + recoveryError);
+                await MegaCrit.Sts2.Core.Nodes.NGame.Instance!.ReturnToMainMenu();
+            }
             throw;
         }
         finally
@@ -300,6 +308,59 @@ internal static class Recorder
         }
         catch (Exception ex) { Status = "Restored, but saving failed: " + ex.Message; throw; }
         finally { Busy = false; }
+    }
+
+    internal static void Suspend(Exception error)
+    {
+        Faulted = true;
+        _needPoint = _dirty = _resumePending = false;
+        LastError = error.ToString();
+        Status = "History paused";
+        GD.PrintErr("[slpp] " + LastError);
+    }
+
+    internal static void Capture(Action callback)
+    {
+        if (Faulted) return;
+        try { callback(); }
+        catch (Exception error) { Suspend(error); }
+    }
+
+    private static async Task Replay(RoomRecord room, TimelinePoint target)
+    {
+        _generation++;
+        _externalDepth = _replayChoice = 0;
+        _replayRoom = room;
+        _target = target;
+        WaitingForChoice = false;
+        LastError = null;
+        await GameBridge.Load(room);
+        await WaitBoundary(target.Commands == 0);
+        for (int i = 0; i < target.Commands; i++)
+        {
+            var command = room.Commands[i];
+            if (command.Kind == "action")
+            {
+                var evt = GameBridge.Unpack<CombatReplayEvent>(command.Data);
+                GameBridge.Manager.ActionQueueSynchronizer.RequestEnqueue(evt.action!.ToGameAction(GameBridge.State!.GetPlayer(evt.playerId!.Value)!));
+            }
+            else ExternalDecisions.Execute(command);
+            await WaitBoundary(i == target.Commands - 1);
+        }
+        if (_replayChoice != target.Choices) throw new InvalidOperationException("Recorded choices were not fully consumed");
+    }
+
+    private static async Task<string> CheckLegacyBoundary(int roomIndex, RoomRecord room, TimelinePoint target, string actual)
+    {
+        var previous = History!.Rooms.Take(roomIndex).LastOrDefault(r => r.Commands.Any(c => c.Kind == "action"));
+        if (previous == null) return actual;
+        var end = previous.Points[^1];
+        await Replay(previous, end);
+        if (GameBridge.Fingerprint(end.FingerprintVersion) != end.Hash)
+            throw new InvalidOperationException("Previous combat could not be verified");
+        var players = NetFullCombatState.FromRun(GameBridge.State!, null).Players;
+        await Replay(room, target);
+        return GameBridge.Fingerprint(1, players);
     }
 
     private static async Task WaitBoundary(bool final)
@@ -328,6 +389,12 @@ internal static class Recorder
 
     internal static bool RecordExternal(string kind, int index, string label)
     {
+        try { return RecordExternalCore(kind, index, label); }
+        catch (Exception error) { Suspend(error); return false; }
+    }
+
+    private static bool RecordExternalCore(string kind, int index, string label)
+    {
         if (Restoring || Faulted || _resumePending || !GameBridge.Singleplayer || Room == null) return false;
         if (Room.Points.Count == 0) AddPoint(false, "Room start");
         if (_atHistoricalPosition) History!.Branch();
@@ -343,6 +410,11 @@ internal static class Recorder
         int generation = _generation;
         _externalDepth++;
         try { await task; }
+        catch (Exception error)
+        {
+            if (Restoring && generation == _generation) LastError = error.ToString();
+            throw;
+        }
         finally { if (generation == _generation) _externalDepth--; }
     }
     internal static async Task<T> Track<T>(Task<T> task)
@@ -350,6 +422,11 @@ internal static class Recorder
         int generation = _generation;
         _externalDepth++;
         try { return await task; }
+        catch (Exception error)
+        {
+            if (Restoring && generation == _generation) LastError = error.ToString();
+            throw;
+        }
         finally { if (generation == _generation) _externalDepth--; }
     }
     internal static Task TurnStep(int direction)
@@ -408,7 +485,7 @@ internal static class Recorder
                 TimelineText.Normalize(history);
                 History = history;
                 _detached = true;
-                Status = "History ready · Continue to resume, or open Timeline";
+                Status = "History ready";
                 return;
             }
             catch (Exception e) { GD.PrintErr("[slpp] Cannot read " + Path.GetFileName(path) + ": " + e.Message); }

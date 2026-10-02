@@ -38,8 +38,8 @@ internal static class TimelineText
     {
         foreach (var room in history.Rooms)
         {
-            if (!room.Label.StartsWith("Act ", StringComparison.Ordinal))
-                room.Label = $"Act {GameBridge.ReadSave(room.Save).CurrentActIndex + 1} · Floor {room.Floor}";
+            room.Label = room.Label.Split('\u00b7').Last().Trim();
+            if (room.Label.StartsWith("Floor ", StringComparison.Ordinal)) room.Label = "Room";
             for (int i = 0; i < room.Commands.Count; i++)
             {
                 var command = room.Commands[i];

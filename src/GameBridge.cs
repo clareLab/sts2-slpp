@@ -30,7 +30,8 @@ internal static class GameBridge
     internal static RunState? State => Manager.DebugOnlyGetState();
     internal static bool Singleplayer => State != null && Manager.NetService.Type == NetGameType.Singleplayer;
     internal static string Build => ReleaseInfoManager.Instance.ReleaseInfo?.Commit ?? "unknown";
-    internal static int Turn => LocalContext.GetMe(State)?.PlayerCombatState?.TurnNumber ?? 0;
+    internal static bool InCombatRoom => State?.CurrentRoom is CombatRoom;
+    internal static int Turn => InCombatRoom ? LocalContext.GetMe(State)?.PlayerCombatState?.TurnNumber ?? 0 : 0;
     internal static bool ChoiceOpen => NPlayerHand.Instance?.IsInCardSelection == true ||
         NOverlayStack.Instance?.Peek() is NCardGridSelectionScreen or NChooseACardSelectionScreen or NCardRewardSelectionScreen or NChooseARelicSelection;
     internal static bool TreasureOpen => NRun.Instance?.TreasureRoom is { } room &&
@@ -56,11 +57,35 @@ internal static class GameBridge
         reader.Reset(bytes);
         return reader.Read<T>();
     }
-    internal static string Fingerprint()
+    internal static string Fingerprint(int version = 2, IReadOnlyList<NetFullCombatState.PlayerState>? legacyPlayers = null)
     {
         if (State == null) return "";
         var writer = new PacketWriter { WarnOnGrow = false };
-        NetFullCombatState.FromRun(State, null).Serialize(writer);
+        var combat = NetFullCombatState.FromRun(State, null);
+        if (!InCombatRoom && !CombatManager.Instance.IsInProgress)
+        {
+            if (version >= 2) combat.Creatures.Clear();
+            for (int i = 0; i < combat.Players.Count; i++)
+            {
+                var player = combat.Players[i];
+                if (version >= 2)
+                {
+                    player.turnNumber = player.energy = player.stars = 0;
+                    player.phase = PlayerTurnPhase.None;
+                    player.piles.Clear();
+                    player.orbs.Clear();
+                }
+                else if (legacyPlayers?.FirstOrDefault(p => p.playerId == player.playerId) is { } legacy)
+                {
+                    player.turnNumber = legacy.turnNumber;
+                    player.phase = legacy.phase;
+                    player.energy = legacy.energy;
+                    player.stars = legacy.stars;
+                }
+                combat.Players[i] = player;
+            }
+        }
+        combat.Serialize(writer);
         foreach (var player in State.Players)
         {
             var saved = player.ToSerializable();
