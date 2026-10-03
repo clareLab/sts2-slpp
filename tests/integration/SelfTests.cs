@@ -952,7 +952,7 @@ internal static class SelfTests
         SlppConfig.Actions = SlppConfig.QuickRestart = true;
         SlppConfig.Scale = 100;
         for (int i = 0; i < 5; i++) await GameBridge.Frame();
-        foreach (string name in new[] { "SlppToolbarRestartRoom", "SlppToolbarRestartSeed", "SlppToolbarRandomSeed", "SlppRestartRoom", "SlppRestartSeed", "SlppRandomSeed" })
+        foreach (string name in new[] { "SlppToolbarRestartRoom", "SlppToolbarRestartSeed", "SlppToolbarRandomSeed" })
         {
             var button = Widget<Button>(name);
             var point = button.GetGlobalRect().GetCenter();
@@ -961,7 +961,7 @@ internal static class SelfTests
             Check(!Recorder.Busy && GameBridge.Fingerprint() == hash && !button.GetNode<Control>("HoldBorder").Visible,
                 name + " ignores a short mouse click");
         }
-        var menuItem = Widget<Button>("SlppRestartRoom");
+        var menuItem = Widget<Button>("SlppPreviousTurn");
         var hover = menuItem.GetGlobalRect().GetCenter();
         root.WarpMouse(hover);
         root.PushInput(new InputEventMouseMotion { Position = hover, GlobalPosition = hover }, true);

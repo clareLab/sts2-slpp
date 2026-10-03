@@ -110,9 +110,8 @@ internal static class Hud
         box.AddChild(_progress);
         _menu = Sheet("SlppMenu", 0, out var menu);
         menu.AddThemeConstantOverride("separation", 2);
-        foreach (var shortcut in new[] { Shortcut.PreviousTurn, Shortcut.NextTurn, Shortcut.RestartRoom, Shortcut.RestartSeed, Shortcut.RandomSeed })
+        foreach (var shortcut in new[] { Shortcut.PreviousTurn, Shortcut.NextTurn })
         {
-            if (shortcut == Shortcut.RestartRoom) menu.AddChild(new HSeparator());
             var item = Ui.MenuRow(SlppConfig.Name(shortcut), Ui.ShortcutIcon(shortcut), null, "Slpp" + shortcut);
             BindAction(item.Button, shortcut);
             menu.AddChild(item.Button);
