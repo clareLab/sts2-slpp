@@ -74,13 +74,25 @@ def prepare(root):
     shutil.copy2(image, workspace / "image.png")
     write_json(workspace / "workshop.json", {
         "title": manifest["name"],
-        "description": manifest["description"] + " Requires BaseLib.",
+        "description": config["description"],
         "visibility": config["visibility"],
         "changeNote": "Version " + version,
         "dependencies": config["dependencies"],
         "tags": [],
         "contentDescriptors": [],
     })
+    previews = workspace / "previews"
+    images = sorted((root / "workshop/previews").glob("*.png"))
+    if not images:
+        raise ValueError("Workshop previews are missing")
+    for preview in images:
+        if preview.stat().st_size >= 1_000_000 or not preview.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"):
+            raise ValueError(f"{preview.name} must be a PNG smaller than 1 MB")
+    if previews.exists():
+        shutil.rmtree(previews)
+    previews.mkdir()
+    for preview in images:
+        shutil.copy2(preview, previews / preview.name)
     return workspace
 
 

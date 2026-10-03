@@ -13,15 +13,16 @@ class WorkshopTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
-        for name in ("src", "workshop", "artifacts/dist/slpp"):
+        for name in ("src", "workshop", "artifacts/dist/slpp", "workshop/previews"):
             (self.root / name).mkdir(parents=True)
-        self.config = {"id": None, "visibility": "public", "dependencies": [3737335127]}
+        self.config = {"id": None, "visibility": "public", "dependencies": [3737335127], "description": "Undo, redo and revisit earlier decisions."}
         self.manifest = {"id": "slpp", "name": "Save & Load ++", "description": "Undo and redo.", "version": "0.3.0"}
         self.save_config()
         workshop.write_json(self.root / "src/slpp.json", self.manifest)
         workshop.write_json(self.root / "artifacts/dist/slpp/slpp.json", self.manifest)
         (self.root / "src/slpp.csproj").write_text("<Project><PropertyGroup><Version>0.3.0</Version></PropertyGroup></Project>")
         (self.root / "workshop/image.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        (self.root / "workshop/previews/history.png").write_bytes(b"\x89PNG\r\n\x1a\n")
         (self.root / "artifacts/dist/slpp/slpp.dll").write_bytes(b"fixture")
         (self.root / "artifacts/dist/slpp/LICENSE").write_text("MIT")
 
@@ -35,6 +36,8 @@ class WorkshopTests(unittest.TestCase):
         metadata = json.loads((workspace / "workshop.json").read_text())
         self.assertEqual(metadata["title"], "Save & Load ++")
         self.assertEqual(metadata["dependencies"], [3737335127])
+        self.assertEqual(metadata["description"], self.config["description"])
+        self.assertEqual({p.name for p in (workspace / "previews").iterdir()}, {"history.png"})
         self.assertEqual(metadata["changeNote"], "Version 0.3.0")
 
     def test_stale_package_is_rejected(self):
